@@ -1,56 +1,108 @@
 "use client";
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 
-// 1. On met à jour la structure (On ajoute les liens)
 type Topic = {
   id: number;
   title: string;
   stage: number;
   next_review: string;
-  courseLink?: string;   // Nouveau : Lien vers le cours
-  exerciseLink?: string; // Nouveau : Lien vers les exos
+  courseLink?: string;
+  exerciseLink?: string;
 };
 
 export default function Home() {
   const [topics, setTopics] = useState<Topic[]>([]);
   const [inputVal, setInputVal] = useState("");
-  
-  // Nouveaux états pour les liens
   const [courseLink, setCourseLink] = useState("");
   const [exoLink, setExoLink] = useState("");
-
   const [isLoaded, setIsLoaded] = useState(false);
-  const [studyingTopic, setStudyingTopic] = useState<Topic | null>(null); // Le cours qu'on révise actuellement
+  
+  // États pour le mode Révision & Chrono
+  const [studyingTopic, setStudyingTopic] = useState<Topic | null>(null);
+  const [timeLeft, setTimeLeft] = useState(20 * 60);
+  const [isTimerActive, setIsTimerActive] = useState(false);
 
-  // Chargement
+  const fileInputRef = useRef<HTMLInputElement>(null);
+
   useEffect(() => {
     const saved = localStorage.getItem("my-courses");
     if (saved) setTopics(JSON.parse(saved));
     setIsLoaded(true);
   }, []);
 
-  // Sauvegarde
   useEffect(() => {
     if (isLoaded) localStorage.setItem("my-courses", JSON.stringify(topics));
   }, [topics, isLoaded]);
 
+  // Chronomètre
+  useEffect(() => {
+    let interval: NodeJS.Timeout;
+    if (isTimerActive && timeLeft > 0) {
+      interval = setInterval(() => {
+        setTimeLeft((prev) => prev - 1);
+      }, 1000);
+    } else if (timeLeft === 0) {
+      setIsTimerActive(false);
+    }
+    return () => clearInterval(interval);
+  }, [isTimerActive, timeLeft]);
+
+  useEffect(() => {
+    if (studyingTopic) {
+      setTimeLeft(20 * 60);
+      setIsTimerActive(false);
+    }
+  }, [studyingTopic]);
+
+  const formatTime = (seconds: number) => {
+    const mins = Math.floor(seconds / 60);
+    const secs = seconds % 60;
+    return `${mins}:${secs < 10 ? '0' : ''}${secs}`;
+  };
+
+  const exportData = () => {
+    const jsonString = `data:text/json;chatset=utf-8,${encodeURIComponent(JSON.stringify(topics))}`;
+    const link = document.createElement("a");
+    link.href = jsonString;
+    link.download = `memory-backup-${new Date().toISOString().split('T')[0]}.json`;
+    link.click();
+  };
+
+  const importData = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const fileReader = new FileReader();
+    if (e.target.files && e.target.files[0]) {
+      fileReader.readAsText(e.target.files[0], "UTF-8");
+      fileReader.onload = (event) => {
+        if (event.target?.result) {
+          try {
+            const parsedData = JSON.parse(event.target.result as string);
+            if (Array.isArray(parsedData)) {
+              if(confirm("Attention : Cela va remplacer tes cours actuels. Continuer ?")) {
+                setTopics(parsedData);
+                alert("Données chargées !");
+              }
+            }
+          } catch (err) {
+            alert("Fichier invalide.");
+          }
+        }
+      };
+    }
+  };
+
   const addCourse = () => {
     if (inputVal.trim() === "") return;
-    
     const date = new Date();
     date.setDate(date.getDate() + 1);
-
     const newTopic: Topic = {
       id: Date.now(),
       title: inputVal,
       stage: 0,
       next_review: date.toISOString().split("T")[0],
-      courseLink: courseLink, // On enregistre le lien cours
-      exerciseLink: exoLink,  // On enregistre le lien exos
+      courseLink: courseLink,
+      exerciseLink: exoLink,
     };
-
     setTopics([newTopic, ...topics]);
-    // Reset des champs
     setInputVal("");
     setCourseLink("");
     setExoLink("");
@@ -60,195 +112,173 @@ export default function Home() {
     setTopics(topics.map(topic => {
       if (topic.id === id) {
         let daysToAdd = 1;
-        
-        // Algorithme ajusté selon la difficulté
-        if (difficulty === 'hard') {
-           daysToAdd = 1; // Si c'était dur, on revoit demain
-        } else {
+        if (difficulty === 'hard') daysToAdd = 1;
+        else {
            if (topic.stage === 0) daysToAdd = 3;
            if (topic.stage === 1) daysToAdd = 7;
            if (topic.stage === 2) daysToAdd = 14;
            if (topic.stage >= 3) daysToAdd = 30;
         }
-
         const newDate = new Date();
         newDate.setDate(newDate.getDate() + daysToAdd);
-
-        return {
-          ...topic,
-          stage: topic.stage + 1,
-          next_review: newDate.toISOString().split("T")[0]
-        };
+        return { ...topic, stage: topic.stage + 1, next_review: newDate.toISOString().split("T")[0] };
       }
       return topic;
     }));
-    setStudyingTopic(null); // On ferme la fenêtre de révision
+    setStudyingTopic(null);
   };
 
-  const sortedTopics = [...topics].sort((a, b) => a.next_review.localeCompare(b.next_review));
+  const deleteCourse = (id: number) => {
+    if (confirm("Supprimer ce cours ?")) {
+      setTopics(topics.filter(t => t.id !== id));
+      setStudyingTopic(null);
+    }
+  };
+
+  const getGroupedTopics = () => {
+    const groups: { [key: string]: Topic[] } = {};
+    const sorted = [...topics].sort((a, b) => a.next_review.localeCompare(b.next_review));
+    sorted.forEach(topic => {
+      if (!groups[topic.next_review]) groups[topic.next_review] = [];
+      groups[topic.next_review].push(topic);
+    });
+    return groups;
+  };
+  const groupedTopics = getGroupedTopics();
+  const sortedDates = Object.keys(groupedTopics).sort();
+
+  const formatDateLabel = (dateStr: string) => {
+    const today = new Date().toISOString().split("T")[0];
+    if (dateStr === today) return "🔥 Aujourd'hui";
+    const d = new Date(dateStr);
+    return d.toLocaleDateString("fr-FR", { weekday: 'long', day: 'numeric', month: 'short' });
+  };
 
   if (!isLoaded) return <div className="p-10 text-center">Chargement...</div>;
 
   return (
-    <div className="min-h-screen bg-gray-50 p-4 md:p-8 font-sans text-gray-800 relative">
-      <div className="max-w-2xl mx-auto">
-        
-        <header className="mb-8 text-center">
-          <h1 className="text-4xl font-extrabold text-indigo-600 mb-2">🧠 Memory Curve</h1>
-          <p className="text-gray-600">V2 : Avec documents</p>
-        </header>
+    <div className="min-h-screen bg-gray-50 font-sans text-gray-800 flex flex-col md:flex-row">
+      
+      {/* SIDEBAR INTERACTIVE */}
+      <aside className="w-full md:w-80 bg-white border-r border-gray-200 p-6 flex flex-col h-auto md:h-screen sticky top-0">
+        <div className="mb-8">
+          <h1 className="text-2xl font-extrabold text-indigo-600 mb-1">🧠 Memory</h1>
+          <p className="text-xs text-gray-400 font-bold uppercase">Planning (Cliquable)</p>
+        </div>
 
-        {/* --- FORMULAIRE D'AJOUT AMÉLIORÉ --- */}
-        <div className="bg-white p-4 rounded-2xl shadow-md mb-8 border border-gray-100">
-          <h3 className="font-bold mb-3 text-gray-700">Nouveau sujet</h3>
+        <div className="flex-1 overflow-y-auto space-y-6 pr-2">
+          {sortedDates.length === 0 && <p className="text-gray-400 text-sm italic">Aucune révision.</p>}
+          {sortedDates.map(date => {
+             const isToday = date === new Date().toISOString().split("T")[0];
+             return (
+              <div key={date} className={`relative ${isToday ? 'bg-indigo-50 -mx-4 px-4 py-3 rounded-xl border border-indigo-100' : ''}`}>
+                <h3 className={`font-bold capitalize mb-2 ${isToday ? 'text-indigo-700' : 'text-gray-700'}`}>{formatDateLabel(date)}</h3>
+                <ul className="space-y-1 border-l-2 border-gray-100 pl-3">
+                  {groupedTopics[date].map(t => (
+                    // ICI : ON REND LES ÉLÉMENTS CLIQUABLES
+                    <li 
+                      key={t.id} 
+                      onClick={() => setStudyingTopic(t)}
+                      className="text-sm text-gray-500 truncate cursor-pointer hover:text-indigo-600 hover:bg-gray-100 py-1 px-2 rounded transition flex items-center gap-2 group"
+                    >
+                      <span className="opacity-0 group-hover:opacity-100 text-xs">👁</span>
+                      {t.title}
+                    </li>
+                  ))}
+                </ul>
+              </div>
+             )
+          })}
+        </div>
+
+        {/* ZONE SAUVEGARDE */}
+        <div className="mt-6 pt-6 border-t border-gray-100 flex gap-2">
+          <button onClick={exportData} className="flex-1 bg-gray-100 hover:bg-gray-200 text-gray-600 text-xs font-bold py-2 rounded-lg transition">📥 Sauver</button>
+          <button onClick={() => fileInputRef.current?.click()} className="flex-1 bg-gray-100 hover:bg-gray-200 text-gray-600 text-xs font-bold py-2 rounded-lg transition">📤 Charger</button>
+          <input type="file" ref={fileInputRef} onChange={importData} className="hidden" accept=".json" />
+        </div>
+      </aside>
+
+      {/* MAIN */}
+      <main className="flex-1 p-4 md:p-10 max-w-4xl overflow-y-auto h-screen">
+        <div className="bg-white p-5 rounded-2xl shadow-sm border border-gray-200 mb-8">
+          <h3 className="font-bold mb-4 text-gray-800">➕ Ajouter un sujet</h3>
           <div className="flex flex-col gap-3">
-            <input
-              type="text"
-              value={inputVal}
-              onChange={(e) => setInputVal(e.target.value)}
-              placeholder="Titre du cours (ex: Optique Géométrique)..."
-              className="p-3 border-2 border-indigo-100 rounded-xl focus:outline-none focus:border-indigo-500"
-            />
-            
+            <input type="text" value={inputVal} onChange={(e) => setInputVal(e.target.value)} placeholder="Titre..." className="p-3 bg-gray-50 border rounded-xl" />
             <div className="flex gap-2">
-              <input
-                type="text"
-                value={courseLink}
-                onChange={(e) => setCourseLink(e.target.value)}
-                placeholder="🔗 Lien vers le cours (Drive, PDF...)"
-                className="flex-1 p-2 text-sm border border-gray-200 rounded-lg focus:outline-none focus:border-indigo-300"
-              />
-              <input
-                type="text"
-                value={exoLink}
-                onChange={(e) => setExoLink(e.target.value)}
-                placeholder="🔗 Lien vers les exos"
-                className="flex-1 p-2 text-sm border border-gray-200 rounded-lg focus:outline-none focus:border-indigo-300"
-              />
+              <input type="text" value={courseLink} onChange={(e) => setCourseLink(e.target.value)} placeholder="🔗 Lien Cours" className="flex-1 p-2 text-sm bg-gray-50 border rounded-lg" />
+              <input type="text" value={exoLink} onChange={(e) => setExoLink(e.target.value)} placeholder="🔗 Lien Exos" className="flex-1 p-2 text-sm bg-gray-50 border rounded-lg" />
             </div>
-
-            <button onClick={addCourse} className="bg-indigo-600 text-white py-3 rounded-xl font-bold hover:bg-indigo-700 transition">
-              Ajouter au planning
-            </button>
+            <button onClick={addCourse} className="bg-black text-white py-3 rounded-xl font-bold hover:bg-gray-800 transition">Ajouter</button>
           </div>
         </div>
 
-        {/* --- LISTE DES COURS --- */}
-        <div className="space-y-3">
-          {sortedTopics.map((topic) => {
-            const today = new Date().toISOString().split("T")[0];
-            const isUrgent = topic.next_review <= today;
-
-            return (
-              <div key={topic.id} className={`flex justify-between items-center p-4 rounded-xl border ${isUrgent ? 'bg-white border-l-4 border-l-orange-500 shadow-md' : 'bg-gray-100 opacity-70'}`}>
-                <div>
-                  <h3 className="font-bold text-gray-800">{topic.title}</h3>
-                  <p className="text-xs text-gray-500">
-                     {isUrgent ? "🔥 À réviser aujourd'hui" : `📅 Prévu le ${topic.next_review}`}
-                  </p>
-                </div>
-                
-                {isUrgent ? (
-                  <button 
-                    onClick={() => setStudyingTopic(topic)}
-                    className="bg-orange-500 hover:bg-orange-600 text-white px-4 py-2 rounded-lg font-bold shadow-sm transition"
-                  >
-                    🚀 Réviser
-                  </button>
-                ) : (
-                  <span className="text-gray-400 text-sm">En attente</span>
-                )}
+        <h2 className="text-2xl font-bold mb-6 text-gray-800">À faire aujourd'hui</h2>
+        <div className="grid gap-4">
+          {topics.filter(t => t.next_review <= new Date().toISOString().split("T")[0]).map((topic) => (
+            <div key={topic.id} className="flex justify-between items-center p-5 bg-white rounded-xl border border-gray-100 shadow-sm hover:shadow-md transition">
+              <div>
+                <h3 className="font-bold text-lg text-gray-900">{topic.title}</h3>
+                <p className="text-xs text-orange-500 font-bold mt-1">🔥 Urgent</p>
               </div>
-            );
-          })}
-        </div>
-      </div>
-
-      {/* --- LE MODE RÉVISION (MODAL) --- */}
-      {studyingTopic && (
-        <div className="fixed inset-0 bg-black/80 backdrop-blur-sm z-50 flex items-center justify-center p-4">
-          <div className="bg-white w-full max-w-3xl h-[80vh] rounded-2xl flex flex-col shadow-2xl overflow-hidden">
-            
-            {/* Header du modal */}
-            <div className="p-4 border-b flex justify-between items-center bg-gray-50">
-              <h2 className="text-xl font-bold text-gray-800">📚 {studyingTopic.title}</h2>
-              <button onClick={() => setStudyingTopic(null)} className="text-gray-400 hover:text-red-500">
-                Fermer ✕
+              <button onClick={() => setStudyingTopic(topic)} className="px-6 py-3 bg-indigo-600 text-white rounded-xl font-bold shadow-indigo-100 shadow-lg hover:bg-indigo-700 transition">
+                🚀 GO
               </button>
             </div>
+          ))}
+          {topics.filter(t => t.next_review <= new Date().toISOString().split("T")[0]).length === 0 && (
+            <div className="text-center py-12 bg-white rounded-2xl border border-dashed text-gray-400">Tout est à jour ! Regarde le planning à gauche.</div>
+          )}
+        </div>
+      </main>
 
-            {/* Corps du modal (Split View) */}
-            <div className="flex-1 flex flex-col md:flex-row divide-y md:divide-y-0 md:divide-x overflow-hidden">
+      {/* MODAL */}
+      {studyingTopic && (
+        <div className="fixed inset-0 bg-black/90 backdrop-blur-md z-50 flex items-center justify-center p-2 md:p-4">
+          <div className="bg-white w-full max-w-6xl h-[95vh] rounded-2xl flex flex-col shadow-2xl overflow-hidden animate-in zoom-in-95 duration-200">
+            
+            <div className="p-4 border-b flex justify-between items-center bg-gray-50">
+              <div className="flex flex-col">
+                <h2 className="text-lg font-bold truncate max-w-[200px]">{studyingTopic.title}</h2>
+                <span className="text-xs text-gray-500">Prévu le {studyingTopic.next_review}</span>
+              </div>
               
-              {/* PARTIE GAUCHE : LE COURS */}
-              <div className="flex-1 p-6 overflow-y-auto bg-blue-50/30">
-                <h3 className="font-bold text-blue-600 mb-4 flex items-center gap-2">📖 Le Cours</h3>
+              <div className="flex items-center gap-3 bg-white px-4 py-2 rounded-full shadow-sm border border-gray-200">
+                <span className={`font-mono text-2xl font-bold ${timeLeft < 60 ? 'text-red-500 animate-pulse' : 'text-gray-800'}`}>
+                  {formatTime(timeLeft)}
+                </span>
+                <button onClick={() => setIsTimerActive(!isTimerActive)} className={`w-8 h-8 rounded-full flex items-center justify-center text-white transition ${isTimerActive ? 'bg-orange-400' : 'bg-green-500'}`}>
+                  {isTimerActive ? '⏸' : '▶'}
+                </button>
+              </div>
+
+              <button onClick={() => setStudyingTopic(null)} className="bg-gray-200 hover:bg-gray-300 rounded-full w-8 h-8 font-bold">✕</button>
+            </div>
+
+            <div className="flex-1 flex flex-col md:flex-row divide-y md:divide-y-0 md:divide-x overflow-hidden bg-gray-100">
+              <div className="flex-1 p-4 overflow-y-auto">
+                <h3 className="text-blue-600 font-bold mb-4">📖 Le Cours</h3>
                 {studyingTopic.courseLink ? (
-                  <div className="flex flex-col gap-4">
-                    <p className="text-sm text-gray-600">Document disponible :</p>
-                    <a 
-                      href={studyingTopic.courseLink} 
-                      target="_blank" 
-                      rel="noopener noreferrer"
-                      className="block p-4 bg-white border border-blue-200 rounded-xl hover:shadow-md transition text-blue-600 font-medium text-center"
-                    >
-                      Voir le document de cours ↗
-                    </a>
-                    {/* Si c'est une image, on essaie de l'afficher */}
-                    {(studyingTopic.courseLink.endsWith('.jpg') || studyingTopic.courseLink.endsWith('.png')) && (
-                       <img src={studyingTopic.courseLink} alt="Cours" className="rounded-lg shadow-sm mt-2 max-h-60 object-cover" />
-                    )}
-                  </div>
-                ) : (
-                  <p className="text-gray-400 italic">Aucun lien de cours ajouté.</p>
-                )}
+                  <iframe src={studyingTopic.courseLink.replace('/view', '/preview')} className="w-full h-full min-h-[400px] rounded-xl border bg-white" title="Cours" />
+                ) : <div className="h-64 flex items-center justify-center text-gray-400 italic bg-white rounded-xl border">Pas de document</div>}
+                {studyingTopic.courseLink && <a href={studyingTopic.courseLink} target="_blank" className="block mt-2 text-center text-sm text-blue-500 underline">Ouvrir dans un nouvel onglet</a>}
               </div>
 
-              {/* PARTIE DROITE : LES EXERCICES */}
-              <div className="flex-1 p-6 overflow-y-auto bg-green-50/30">
-                <h3 className="font-bold text-green-600 mb-4 flex items-center gap-2">✏️ Exercices</h3>
+              <div className="flex-1 p-4 overflow-y-auto bg-white">
+                <h3 className="text-green-600 font-bold mb-4">✏️ Exercices</h3>
                 {studyingTopic.exerciseLink ? (
-                  <div className="flex flex-col gap-4">
-                    <p className="text-sm text-gray-600">Exercices disponibles :</p>
-                    <a 
-                      href={studyingTopic.exerciseLink} 
-                      target="_blank" 
-                      rel="noopener noreferrer"
-                      className="block p-4 bg-white border border-green-200 rounded-xl hover:shadow-md transition text-green-600 font-medium text-center"
-                    >
-                      Ouvrir la fiche d'exos ↗
-                    </a>
-                  </div>
-                ) : (
-                  <p className="text-gray-400 italic">Aucun exercice lié.</p>
-                )}
-              </div>
-
-            </div>
-
-            {/* Footer : Validation */}
-            <div className="p-4 border-t bg-gray-50 flex flex-col items-center gap-2">
-              <p className="text-sm text-gray-500 font-medium">Comment s'est passée la révision ?</p>
-              <div className="flex gap-3 w-full max-w-md">
-                <button 
-                  onClick={() => reviewCourse(studyingTopic.id, 'hard')}
-                  className="flex-1 py-3 bg-red-100 text-red-700 font-bold rounded-xl hover:bg-red-200 transition"
-                >
-                  🥵 Difficile
-                </button>
-                <button 
-                  onClick={() => reviewCourse(studyingTopic.id, 'easy')}
-                  className="flex-1 py-3 bg-green-500 text-white font-bold rounded-xl hover:bg-green-600 transition"
-                >
-                  ✅ Validé
-                </button>
+                   <a href={studyingTopic.exerciseLink} target="_blank" className="block p-6 bg-green-50 border border-green-200 rounded-xl text-green-700 font-bold text-center hover:bg-green-100 transition">📝 Accéder aux Exercices</a>
+                ) : <div className="text-gray-400 italic text-center mt-10">Pas d'exercices</div>}
               </div>
             </div>
 
+            <div className="p-4 bg-white border-t flex justify-center gap-4">
+               <button onClick={() => reviewCourse(studyingTopic.id, 'hard')} className="px-6 py-3 bg-red-100 text-red-700 font-bold rounded-xl hover:bg-red-200 transition">😰 Dur (Demain)</button>
+               <button onClick={() => reviewCourse(studyingTopic.id, 'easy')} className="px-6 py-3 bg-green-500 text-white font-bold rounded-xl hover:bg-green-600 transition shadow-lg">✅ Fait (Suivant)</button>
+            </div>
           </div>
         </div>
       )}
-
     </div>
   );
 }
