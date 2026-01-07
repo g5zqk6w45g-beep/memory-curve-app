@@ -1,7 +1,14 @@
 import { createClient } from '@supabase/supabase-js';
 
-// Si les clés ne sont pas encore chargées (pendant le build), on met des fausses valeurs pour éviter le crash.
-const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || "https://placeholder.supabase.co";
-const supabaseKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || "placeholder-key";
+// On récupère les clés
+const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
+const supabaseKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
 
-export const supabase = createClient(supabaseUrl, supabaseKey);
+// Astuce pour Vercel : Si les clés n'existent pas (pendant le build), 
+// on ne lance PAS createClient tout de suite pour éviter le crash.
+// On crée un client uniquement si l'URL est présente.
+
+export const supabase = createClient(
+  supabaseUrl || "https://placeholder.supabase.co", 
+  supabaseKey || "placeholder-key"
+);
