@@ -36,7 +36,7 @@ export default function LoginPage() {
     if (error) alert("Erreur : " + error.message);
     setLoading(false);
   };
-
+  console.log("URL Supabase :", process.env.NEXT_PUBLIC_SUPABASE_URL);
   return (
     <div className="min-h-screen flex items-center justify-center bg-gray-50 p-4">
       <div className="bg-white p-8 rounded-2xl shadow-xl w-full max-w-md border border-gray-100">
