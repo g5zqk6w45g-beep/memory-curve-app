@@ -1,7 +1,10 @@
 "use client";
 import { useState, useEffect, useRef } from "react";
 import Link from "next/link";
+import { supabase } from "@/lib/supabase"; // On importe la connexion
+import { useRouter } from "next/navigation"; // Pour rediriger si pas connecté
 
+// On aligne les types avec la Base de Données
 type Flashcard = {
   id: number;
   question: string;
@@ -13,10 +16,10 @@ type Topic = {
   title: string;
   stage: number;
   next_review: string;
-  courseLink?: string;
-  exerciseLink?: string;
+  course_link?: string; // Attention : snake_case comme dans la DB
+  exercise_link?: string;
   subject?: string;
-  isActive?: boolean;
+  is_active?: boolean;
   flashcards?: Flashcard[];
 };
 
@@ -24,36 +27,53 @@ const SUBJECTS = ["Maths", "Méca", "Élec", "Physique", "CGE", "MHO", "Anglais"
 
 export default function Home() {
   const [topics, setTopics] = useState<Topic[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [user, setUser] = useState<any>(null); // L'utilisateur connecté
   
   const [inputVal, setInputVal] = useState("");
   const [courseLink, setCourseLink] = useState("");
   const [exoLink, setExoLink] = useState("");
   const [selectedSubject, setSelectedSubject] = useState("Maths");
 
-  const [isLoaded, setIsLoaded] = useState(false);
-  
-  // Review Logic
   const [studyingTopic, setStudyingTopic] = useState<Topic | null>(null);
   const [timeLeft, setTimeLeft] = useState(20 * 60);
   const [isTimerActive, setIsTimerActive] = useState(false);
-  const [viewMode, setViewMode] = useState<'docs' | 'cards'>('docs'); // 'docs' ou 'cards'
+  const [viewMode, setViewMode] = useState<'docs' | 'cards'>('docs');
 
   // Flashcard Player State
   const [currentCardIndex, setCurrentCardIndex] = useState(0);
   const [isFlipped, setIsFlipped] = useState(false);
 
-  const fileInputRef = useRef<HTMLInputElement>(null);
+  const router = useRouter();
 
+  // --- 1. VERIFICATION AUTH & CHARGEMENT DONNÉES ---
   useEffect(() => {
-    const saved = localStorage.getItem("my-courses");
-    if (saved) setTopics(JSON.parse(saved));
-    setIsLoaded(true);
-  }, []);
+    const checkUserAndFetch = async () => {
+      // Vérifier l'utilisateur
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user) {
+        router.push("/login"); // Pas connecté ? Hop, dehors !
+        return;
+      }
+      setUser(user);
 
-  useEffect(() => {
-    if (isLoaded) localStorage.setItem("my-courses", JSON.stringify(topics));
-  }, [topics, isLoaded]);
+      // Charger les données depuis Supabase
+      // On ne prend que les cours ACTIFS (is_active = true)
+      const { data, error } = await supabase
+        .from("topics")
+        .select("*")
+        .eq("is_active", true);
 
+      if (error) console.error("Erreur chargement:", error);
+      else setTopics(data || []);
+      
+      setLoading(false);
+    };
+
+    checkUserAndFetch();
+  }, [router]);
+
+  // CHRONO LOGIC
   useEffect(() => {
     let interval: NodeJS.Timeout;
     if (isTimerActive && timeLeft > 0) {
@@ -62,12 +82,11 @@ export default function Home() {
     return () => clearInterval(interval);
   }, [isTimerActive, timeLeft]);
 
-  // RESET QUAND ON OUVRE UNE RÉVISION
   useEffect(() => {
     if (studyingTopic) { 
       setTimeLeft(20 * 60); 
       setIsTimerActive(false); 
-      setViewMode('docs'); // Par défaut sur les docs
+      setViewMode('docs'); 
       setCurrentCardIndex(0);
       setIsFlipped(false);
     }
@@ -79,50 +98,74 @@ export default function Home() {
     return `${m}:${sec < 10 ? '0' : ''}${sec}`;
   };
 
-  const addCourse = () => {
-    if (inputVal.trim() === "") return;
+  // --- 2. AJOUTER UN COURS (VERS SUPABASE) ---
+  const addCourse = async () => {
+    if (inputVal.trim() === "" || !user) return;
+    
     const date = new Date();
     date.setDate(date.getDate() + 1);
     
-    const newTopic: Topic = {
-      id: Date.now(),
+    const newTopic = {
+      user_id: user.id, // IMPORTANT : On lie le cours à toi
       title: inputVal,
       stage: 0,
       next_review: date.toISOString().split("T")[0],
-      courseLink: courseLink,
-      exerciseLink: exoLink,
+      course_link: courseLink,
+      exercise_link: exoLink,
       subject: selectedSubject,
-      isActive: true,
+      is_active: true, // Actif par défaut sur l'accueil
       flashcards: []
     };
-    setTopics([newTopic, ...topics]);
-    setInputVal(""); setCourseLink(""); setExoLink("");
+
+    // Envoi à Supabase
+    const { data, error } = await supabase.from("topics").insert([newTopic]).select();
+
+    if (error) {
+      alert("Erreur lors de l'ajout !");
+      console.error(error);
+    } else if (data) {
+      // On met à jour l'affichage localement sans recharger la page
+      setTopics([data[0], ...topics]);
+      setInputVal(""); setCourseLink(""); setExoLink("");
+    }
   };
 
-  const reviewCourse = (id: number, difficulty: 'easy' | 'hard') => {
-    setTopics(topics.map(t => {
-      if (t.id === id) {
-        let daysToAdd = 1;
-        if (difficulty === 'hard') {
-           daysToAdd = 1;
-        } else {
-           if (t.stage === 0) daysToAdd = 2;       
-           else if (t.stage === 1) daysToAdd = 7;  
-           else if (t.stage === 2) daysToAdd = 14; 
-           else daysToAdd = 30;                    
-        }
-        const newDate = new Date();
-        newDate.setDate(newDate.getDate() + daysToAdd);
-        const newStage = difficulty === 'hard' ? 0 : t.stage + 1;
-        
-        return { ...t, stage: newStage, next_review: newDate.toISOString().split("T")[0] };
-      }
-      return t;
-    }));
+  // --- 3. REVISION (UPDATE SUPABASE) ---
+  const reviewCourse = async (id: number, difficulty: 'easy' | 'hard') => {
+    const topic = topics.find(t => t.id === id);
+    if (!topic) return;
+
+    let daysToAdd = 1;
+    let newStage = topic.stage;
+
+    if (difficulty === 'hard') {
+       daysToAdd = 1;
+       newStage = 0; // Reset si dur
+    } else {
+       if (topic.stage === 0) daysToAdd = 2;       
+       else if (topic.stage === 1) daysToAdd = 7;  
+       else if (topic.stage === 2) daysToAdd = 14; 
+       else daysToAdd = 30;
+       newStage = topic.stage + 1;
+    }
+
+    const newDate = new Date();
+    newDate.setDate(newDate.getDate() + daysToAdd);
+    const nextReviewStr = newDate.toISOString().split("T")[0];
+
+    // Mise à jour optimiste (Interface)
+    setTopics(topics.map(t => t.id === id ? { ...t, stage: newStage, next_review: nextReviewStr } : t));
     setStudyingTopic(null);
+
+    // Mise à jour Réelle (Supabase)
+    const { error } = await supabase
+      .from("topics")
+      .update({ stage: newStage, next_review: nextReviewStr })
+      .eq("id", id);
+
+    if (error) console.error("Erreur sauvegarde révision", error);
   };
 
-  // FLASHCARD PLAYER ACTIONS
   const nextCard = () => {
     if (!studyingTopic?.flashcards) return;
     setIsFlipped(false);
@@ -130,46 +173,25 @@ export default function Home() {
         if (currentCardIndex < studyingTopic.flashcards!.length - 1) {
             setCurrentCardIndex(currentCardIndex + 1);
         } else {
-            setCurrentCardIndex(0); // Boucle
+            setCurrentCardIndex(0);
         }
     }, 200);
   };
 
-  const exportData = () => {
-    const jsonString = `data:text/json;chatset=utf-8,${encodeURIComponent(JSON.stringify(topics))}`;
-    const link = document.createElement("a");
-    link.href = jsonString;
-    link.download = `backup.json`;
-    link.click();
-  };
-  
-  const importData = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const fileReader = new FileReader();
-    if (e.target.files && e.target.files[0]) {
-      fileReader.readAsText(e.target.files[0], "UTF-8");
-      fileReader.onload = (event) => {
-        if (event.target?.result) {
-          try {
-            const parsedData = JSON.parse(event.target.result as string);
-            if (Array.isArray(parsedData)) {
-              if(confirm("Remplacer les données actuelles ?")) setTopics(parsedData);
-            }
-          } catch (err) { alert("Erreur fichier"); }
-        }
-      };
-    }
+  // Fonction Logout
+  const handleLogout = async () => {
+    await supabase.auth.signOut();
+    router.push("/login");
   };
 
-  const activeTopics = topics.filter(t => t.isActive !== false);
-
-  const groupedTopics = activeTopics.reduce((acc, t) => {
+  const groupedTopics = topics.reduce((acc, t) => {
     if (!acc[t.next_review]) acc[t.next_review] = [];
     acc[t.next_review].push(t);
     return acc;
   }, {} as { [key: string]: Topic[] });
   const sortedDates = Object.keys(groupedTopics).sort();
 
-  if (!isLoaded) return <div className="p-10 text-center">Chargement...</div>;
+  if (loading) return <div className="min-h-screen flex items-center justify-center text-indigo-600 font-bold">Chargement de tes données...</div>;
 
   return (
     <div className="min-h-screen bg-gray-50 font-sans text-gray-800 flex flex-col md:flex-row">
@@ -195,10 +217,12 @@ export default function Home() {
           ))}
           {sortedDates.length === 0 && <p className="text-gray-400 text-sm italic">Aucune révision active.</p>}
         </div>
-        <div className="mt-4 pt-4 border-t flex gap-2">
-           <button onClick={exportData} className="flex-1 bg-gray-100 text-xs py-2 rounded">📥 Sauver</button>
-           <button onClick={() => fileInputRef.current?.click()} className="flex-1 bg-gray-100 text-xs py-2 rounded">📤 Charger</button>
-           <input type="file" ref={fileInputRef} onChange={importData} className="hidden" />
+        
+        {/* BOUTON DÉCONNEXION */}
+        <div className="mt-4 pt-4 border-t">
+           <button onClick={handleLogout} className="w-full bg-red-50 text-red-600 text-xs py-3 rounded font-bold hover:bg-red-100 transition">
+             Déconnexion
+           </button>
         </div>
       </aside>
 
@@ -222,7 +246,7 @@ export default function Home() {
 
         <h2 className="text-2xl font-bold mb-6">À faire aujourd'hui</h2>
         <div className="grid gap-4">
-          {activeTopics.filter(t => t.next_review <= new Date().toISOString().split("T")[0]).map((topic) => (
+          {topics.filter(t => t.next_review <= new Date().toISOString().split("T")[0]).map((topic) => (
             <div key={topic.id} className="flex justify-between items-center p-5 bg-white/90 backdrop-blur rounded-xl border border-gray-100 shadow-sm">
               <div>
                 <h3 className="font-bold text-lg">{topic.title}</h3>
@@ -232,39 +256,24 @@ export default function Home() {
               <button onClick={() => setStudyingTopic(topic)} className="px-6 py-3 bg-indigo-600 text-white rounded-xl font-bold shadow-lg hover:bg-indigo-700">🚀 GO</button>
             </div>
           ))}
-          {activeTopics.filter(t => t.next_review <= new Date().toISOString().split("T")[0]).length === 0 && <div className="text-center py-10 text-gray-500">Rien à faire !</div>}
+          {topics.filter(t => t.next_review <= new Date().toISOString().split("T")[0]).length === 0 && <div className="text-center py-10 text-gray-500">Rien à faire !</div>}
         </div>
       </main>
 
-      {/* --- MODAL DE RÉVISION AVEC ONGLETS --- */}
+      {/* --- MODAL DE RÉVISION --- */}
       {studyingTopic && (
         <div className="fixed inset-0 bg-black/90 backdrop-blur-md z-50 flex items-center justify-center p-2 md:p-4">
           <div className="bg-white w-full max-w-6xl h-[95vh] rounded-2xl flex flex-col overflow-hidden">
-            
-            {/* Header Modal */}
             <div className="p-4 border-b flex justify-between items-center bg-gray-50">
               <div className="flex items-center gap-4">
                 <h2 className="text-lg font-bold truncate max-w-[150px] md:max-w-xs">{studyingTopic.title}</h2>
-                
-                {/* SELECTEUR D'ONGLETS */}
                 <div className="flex bg-gray-200 p-1 rounded-lg gap-1">
-                  <button 
-                    onClick={() => setViewMode('docs')}
-                    className={`px-3 py-1 rounded-md text-sm font-bold transition ${viewMode === 'docs' ? 'bg-white shadow text-black' : 'text-gray-500 hover:text-gray-700'}`}
-                  >
-                    📄 Docs
-                  </button>
+                  <button onClick={() => setViewMode('docs')} className={`px-3 py-1 rounded-md text-sm font-bold transition ${viewMode === 'docs' ? 'bg-white shadow text-black' : 'text-gray-500 hover:text-gray-700'}`}>📄 Docs</button>
                   {studyingTopic.flashcards && studyingTopic.flashcards.length > 0 && (
-                    <button 
-                      onClick={() => setViewMode('cards')}
-                      className={`px-3 py-1 rounded-md text-sm font-bold transition ${viewMode === 'cards' ? 'bg-white shadow text-indigo-600' : 'text-gray-500 hover:text-gray-700'}`}
-                    >
-                      🃏 Cartes ({studyingTopic.flashcards.length})
-                    </button>
+                    <button onClick={() => setViewMode('cards')} className={`px-3 py-1 rounded-md text-sm font-bold transition ${viewMode === 'cards' ? 'bg-white shadow text-indigo-600' : 'text-gray-500 hover:text-gray-700'}`}>🃏 Cartes</button>
                   )}
                 </div>
               </div>
-
               <div className="flex items-center gap-3 bg-white px-4 py-2 rounded-full border shadow-sm">
                 <span className={`font-mono text-2xl font-bold ${timeLeft < 60 ? 'text-red-500' : ''}`}>{formatTime(timeLeft)}</span>
                 <button onClick={() => setIsTimerActive(!isTimerActive)}>{isTimerActive ? '⏸' : '▶'}</button>
@@ -272,63 +281,38 @@ export default function Home() {
               <button onClick={() => setStudyingTopic(null)} className="font-bold text-xl px-2">✕</button>
             </div>
 
-            {/* CONTENU MODAL (CHANGE SELON L'ONGLET) */}
             <div className="flex-1 overflow-hidden bg-gray-100 relative">
-              
-              {/* VUE DOCUMENTS */}
               {viewMode === 'docs' && (
                 <div className="absolute inset-0 flex flex-col md:flex-row divide-x">
                   <div className="flex-1 p-4 overflow-y-auto">
                     <h3 className="text-blue-600 font-bold mb-4">📖 Cours</h3>
-                    {studyingTopic.courseLink ? <iframe src={studyingTopic.courseLink.replace('/view', '/preview')} className="w-full h-full min-h-[400px] border rounded" /> : <p className="italic text-gray-400">Rien</p>}
-                    {studyingTopic.courseLink && <a href={studyingTopic.courseLink} target="_blank" className="block text-center mt-2 text-blue-500 underline">Ouvrir lien</a>}
+                    {studyingTopic.course_link ? <iframe src={studyingTopic.course_link.replace('/view', '/preview')} className="w-full h-full min-h-[400px] border rounded" /> : <p className="italic text-gray-400">Rien</p>}
+                    {studyingTopic.course_link && <a href={studyingTopic.course_link} target="_blank" className="block text-center mt-2 text-blue-500 underline">Ouvrir lien</a>}
                   </div>
                   <div className="flex-1 p-4 overflow-y-auto">
                      <h3 className="text-green-600 font-bold mb-4">✏️ Exos</h3>
-                     {studyingTopic.exerciseLink ? <a href={studyingTopic.exerciseLink} target="_blank" className="block p-4 bg-green-50 border border-green-200 rounded text-green-700 font-bold text-center">Voir Exos</a> : <p className="italic text-gray-400">Rien</p>}
+                     {studyingTopic.exercise_link ? <a href={studyingTopic.exercise_link} target="_blank" className="block p-4 bg-green-50 border border-green-200 rounded text-green-700 font-bold text-center">Voir Exos</a> : <p className="italic text-gray-400">Rien</p>}
                   </div>
                 </div>
               )}
 
-              {/* VUE FLASHCARDS (PLAYER) */}
               {viewMode === 'cards' && studyingTopic.flashcards && (
                 <div className="absolute inset-0 flex flex-col items-center justify-center p-6 bg-gray-100">
-                  <div 
-                    onClick={() => setIsFlipped(!isFlipped)}
-                    className="w-full max-w-2xl aspect-video bg-white rounded-3xl shadow-xl flex items-center justify-center cursor-pointer hover:shadow-2xl transition transform duration-500 relative"
-                    style={{ perspective: "1000px" }}
-                  >
+                  <div onClick={() => setIsFlipped(!isFlipped)} className="w-full max-w-2xl aspect-video bg-white rounded-3xl shadow-xl flex items-center justify-center cursor-pointer hover:shadow-2xl transition transform duration-500 relative" style={{ perspective: "1000px" }}>
                      <div className="text-center p-8">
-                        <p className="text-sm text-gray-400 uppercase font-bold tracking-widest mb-4">
-                          {isFlipped ? "Verso (Réponse)" : "Recto (Question)"}
-                        </p>
-                        <h3 className={`text-2xl md:text-4xl font-bold ${isFlipped ? 'text-indigo-600' : 'text-gray-800'}`}>
-                          {isFlipped 
-                            ? studyingTopic.flashcards[currentCardIndex].answer 
-                            : studyingTopic.flashcards[currentCardIndex].question}
-                        </h3>
-                        <p className="mt-8 text-gray-400 text-sm animate-pulse">
-                          (Clique pour retourner)
-                        </p>
+                        <p className="text-sm text-gray-400 uppercase font-bold tracking-widest mb-4">{isFlipped ? "Verso (Réponse)" : "Recto (Question)"}</p>
+                        <h3 className={`text-2xl md:text-4xl font-bold ${isFlipped ? 'text-indigo-600' : 'text-gray-800'}`}>{isFlipped ? studyingTopic.flashcards[currentCardIndex].answer : studyingTopic.flashcards[currentCardIndex].question}</h3>
+                        <p className="mt-8 text-gray-400 text-sm animate-pulse">(Clique pour retourner)</p>
                      </div>
                   </div>
-
                   <div className="mt-8 flex items-center gap-6">
-                    <span className="font-mono text-gray-500">
-                      Carte {currentCardIndex + 1} / {studyingTopic.flashcards.length}
-                    </span>
-                    <button 
-                      onClick={nextCard}
-                      className="bg-black text-white px-8 py-3 rounded-full font-bold hover:bg-gray-800 transition shadow-lg"
-                    >
-                      Suivante ➔
-                    </button>
+                    <span className="font-mono text-gray-500">Carte {currentCardIndex + 1} / {studyingTopic.flashcards.length}</span>
+                    <button onClick={nextCard} className="bg-black text-white px-8 py-3 rounded-full font-bold hover:bg-gray-800 transition shadow-lg">Suivante ➔</button>
                   </div>
                 </div>
               )}
             </div>
 
-            {/* FOOTER */}
             <div className="p-4 border-t flex justify-center gap-4 bg-white">
                <button onClick={() => reviewCourse(studyingTopic.id, 'hard')} className="px-6 py-3 bg-red-100 text-red-700 font-bold rounded-xl">😰 Dur</button>
                <button onClick={() => reviewCourse(studyingTopic.id, 'easy')} className="px-6 py-3 bg-green-500 text-white font-bold rounded-xl">✅ Fait</button>

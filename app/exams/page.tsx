@@ -1,6 +1,8 @@
 "use client";
 import { useState, useEffect } from "react";
 import Link from "next/link";
+import { supabase } from "@/lib/supabase";
+import { useRouter } from "next/navigation";
 
 type Flashcard = {
   id: number;
@@ -13,10 +15,10 @@ type Topic = {
   title: string;
   stage: number;
   next_review: string;
-  courseLink?: string;
-  exerciseLink?: string;
+  course_link?: string;
+  exercise_link?: string;
   subject?: string;
-  isActive?: boolean;
+  is_active?: boolean;
   flashcards?: Flashcard[];
 };
 
@@ -24,18 +26,19 @@ type Exam = {
   id: number;
   title: string;
   date: string;
-  topicIds: number[];
+  topic_ids: number[]; // Nom DB (snake_case)
 };
 
 export default function ExamPage() {
   const [topics, setTopics] = useState<Topic[]>([]);
   const [exams, setExams] = useState<Exam[]>([]);
+  const [user, setUser] = useState<any>(null);
+  const router = useRouter();
   
   const [examTitle, setExamTitle] = useState("");
   const [examDate, setExamDate] = useState("");
   const [selectedTopics, setSelectedTopics] = useState<number[]>([]);
 
-  // MODE REVISION
   const [studyingTopic, setStudyingTopic] = useState<Topic | null>(null);
   const [timeLeft, setTimeLeft] = useState(20 * 60);
   const [isTimerActive, setIsTimerActive] = useState(false);
@@ -46,36 +49,35 @@ export default function ExamPage() {
   const [editingExam, setEditingExam] = useState<Exam | null>(null);
   const [editSelectedTopics, setEditSelectedTopics] = useState<number[]>([]);
 
+  // CHARGEMENT
   useEffect(() => {
-    const savedTopics = localStorage.getItem("my-courses");
-    const savedExams = localStorage.getItem("my-exams");
-    if (savedTopics) setTopics(JSON.parse(savedTopics));
-    if (savedExams) setExams(JSON.parse(savedExams));
-  }, []);
+    const init = async () => {
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user) { router.push("/login"); return; }
+      setUser(user);
 
-  useEffect(() => {
-    if (exams.length > 0) localStorage.setItem("my-exams", JSON.stringify(exams));
-  }, [exams]);
+      // Charger Topics
+      const { data: topicsData } = await supabase.from("topics").select("*");
+      if (topicsData) setTopics(topicsData);
 
-  useEffect(() => {
-    if (topics.length > 0) localStorage.setItem("my-courses", JSON.stringify(topics));
-  }, [topics]);
+      // Charger Exams
+      const { data: examsData } = await supabase.from("exams").select("*");
+      if (examsData) setExams(examsData);
+    };
+    init();
+  }, [router]);
 
+  // CHRONO
   useEffect(() => {
     let interval: NodeJS.Timeout;
-    if (isTimerActive && timeLeft > 0) {
-      interval = setInterval(() => setTimeLeft((p) => p - 1), 1000);
-    } else if (timeLeft === 0) setIsTimerActive(false);
+    if (isTimerActive && timeLeft > 0) interval = setInterval(() => setTimeLeft((p) => p - 1), 1000);
+    else if (timeLeft === 0) setIsTimerActive(false);
     return () => clearInterval(interval);
   }, [isTimerActive, timeLeft]);
 
   useEffect(() => {
     if (studyingTopic) { 
-      setTimeLeft(20 * 60); 
-      setIsTimerActive(false); 
-      setViewMode('docs'); 
-      setCurrentCardIndex(0);
-      setIsFlipped(false);
+      setTimeLeft(20 * 60); setIsTimerActive(false); setViewMode('docs'); setCurrentCardIndex(0); setIsFlipped(false);
     }
   }, [studyingTopic]);
 
@@ -90,29 +92,31 @@ export default function ExamPage() {
     else setSelectedTopics([...selectedTopics, id]);
   };
 
-  const addExam = () => {
-    if (!examTitle || !examDate) return;
-    const newExam: Exam = {
-      id: Date.now(),
+  const addExam = async () => {
+    if (!examTitle || !examDate || !user) return;
+    const newExam = {
+      user_id: user.id,
       title: examTitle,
       date: examDate,
-      topicIds: selectedTopics
+      topic_ids: selectedTopics
     };
-    setExams([...exams, newExam]);
-    setExamTitle(""); setExamDate(""); setSelectedTopics([]);
+    const { data, error } = await supabase.from("exams").insert([newExam]).select();
+    if (!error && data) {
+      setExams([...exams, data[0]]);
+      setExamTitle(""); setExamDate(""); setSelectedTopics([]);
+    }
   };
 
-  const deleteExam = (id: number) => {
+  const deleteExam = async (id: number) => {
     if(confirm("Supprimer cet examen définitivement ?")) {
-      const updated = exams.filter(e => e.id !== id);
-      setExams(updated);
-      localStorage.setItem("my-exams", JSON.stringify(updated));
+      setExams(exams.filter(e => e.id !== id));
+      await supabase.from("exams").delete().eq("id", id);
     }
   };
 
   const openEditModal = (exam: Exam) => {
     setEditingExam(exam);
-    setEditSelectedTopics(exam.topicIds);
+    setEditSelectedTopics(exam.topic_ids || []);
   };
 
   const toggleEditTopicSelection = (id: number) => {
@@ -120,31 +124,35 @@ export default function ExamPage() {
     else setEditSelectedTopics([...editSelectedTopics, id]);
   };
 
-  const saveEditedExam = () => {
+  const saveEditedExam = async () => {
     if (!editingExam) return;
-    const updatedExams = exams.map(e => e.id === editingExam.id ? { ...e, topicIds: editSelectedTopics } : e);
+    // Optimiste
+    const updatedExams = exams.map(e => e.id === editingExam.id ? { ...e, topic_ids: editSelectedTopics } : e);
     setExams(updatedExams);
     setEditingExam(null);
+    // DB
+    await supabase.from("exams").update({ topic_ids: editSelectedTopics }).eq("id", editingExam.id);
   };
 
-  const reviewCourse = (id: number, difficulty: 'easy' | 'hard') => {
-    setTopics(topics.map(t => {
-      if (t.id === id) {
-        let daysToAdd = 1;
-        if (difficulty === 'hard') daysToAdd = 1;
-        else {
-           if (t.stage === 0) daysToAdd = 2;       
-           else if (t.stage === 1) daysToAdd = 7;  
-           else if (t.stage === 2) daysToAdd = 14; 
-           else daysToAdd = 30;                    
-        }
-        const newDate = new Date();
-        newDate.setDate(newDate.getDate() + daysToAdd);
-        const newStage = difficulty === 'hard' ? 0 : t.stage + 1;
-        return { ...t, stage: newStage, next_review: newDate.toISOString().split("T")[0] };
-      }
-      return t;
-    }));
+  const reviewCourse = async (id: number, difficulty: 'easy' | 'hard') => {
+    const topic = topics.find(t => t.id === id);
+    if (!topic) return;
+    let daysToAdd = 1;
+    let newStage = topic.stage;
+    if (difficulty === 'hard') { daysToAdd = 1; newStage = 0; } 
+    else {
+       if (topic.stage === 0) daysToAdd = 2;       
+       else if (topic.stage === 1) daysToAdd = 7;  
+       else if (topic.stage === 2) daysToAdd = 14; 
+       else daysToAdd = 30;
+       newStage = topic.stage + 1;
+    }
+    const newDate = new Date(); newDate.setDate(newDate.getDate() + daysToAdd);
+    const nextReviewStr = newDate.toISOString().split("T")[0];
+
+    // Note : Ici on ne met pas à jour le state 'topics' car on est sur la page Exams, 
+    // mais on update la DB pour que ce soit synchro partout.
+    await supabase.from("topics").update({ stage: newStage, next_review: nextReviewStr }).eq("id", id);
     setStudyingTopic(null);
   };
 
@@ -223,7 +231,7 @@ export default function ExamPage() {
                 </div>
                 <div className="pl-4">
                   <div className="flex flex-wrap gap-2">
-                    {exam.topicIds.map(tId => {
+                    {exam.topic_ids && exam.topic_ids.map(tId => {
                       const topic = topics.find(t => t.id === tId);
                       return topic ? (
                         <button key={tId} onClick={() => setStudyingTopic(topic)} className="bg-gray-100 hover:bg-indigo-100 hover:text-indigo-700 text-gray-600 text-xs px-3 py-2 rounded-lg border border-gray-200 flex items-center gap-2 group transition">
@@ -240,6 +248,7 @@ export default function ExamPage() {
               </div>
             );
           })}
+           {upcomingExams.length === 0 && <p className="text-center text-gray-500 italic">Aucun examen à venir.</p>}
         </div>
 
         {pastExams.length > 0 && (
@@ -283,7 +292,6 @@ export default function ExamPage() {
         </div>
       )}
 
-      {/* MODAL REVISION AVEC ONGLETS */}
       {studyingTopic && (
         <div className="fixed inset-0 bg-black/90 backdrop-blur-md z-50 flex items-center justify-center p-2 md:p-4">
           <div className="bg-white w-full max-w-6xl h-[95vh] rounded-2xl flex flex-col overflow-hidden">
@@ -292,9 +300,7 @@ export default function ExamPage() {
                 <h2 className="text-lg font-bold truncate max-w-[150px]">{studyingTopic.title}</h2>
                 <div className="flex bg-gray-200 p-1 rounded-lg gap-1">
                   <button onClick={() => setViewMode('docs')} className={`px-3 py-1 rounded-md text-sm font-bold transition ${viewMode === 'docs' ? 'bg-white shadow text-black' : 'text-gray-500 hover:text-gray-700'}`}>📄 Docs</button>
-                  {studyingTopic.flashcards && studyingTopic.flashcards.length > 0 && (
-                    <button onClick={() => setViewMode('cards')} className={`px-3 py-1 rounded-md text-sm font-bold transition ${viewMode === 'cards' ? 'bg-white shadow text-indigo-600' : 'text-gray-500 hover:text-gray-700'}`}>🃏 Cartes</button>
-                  )}
+                  {studyingTopic.flashcards && studyingTopic.flashcards.length > 0 && <button onClick={() => setViewMode('cards')} className={`px-3 py-1 rounded-md text-sm font-bold transition ${viewMode === 'cards' ? 'bg-white shadow text-indigo-600' : 'text-gray-500 hover:text-gray-700'}`}>🃏 Cartes</button>}
                 </div>
               </div>
               <div className="flex items-center gap-3 bg-white px-4 py-2 rounded-full border shadow-sm">
@@ -303,22 +309,20 @@ export default function ExamPage() {
               </div>
               <button onClick={() => setStudyingTopic(null)} className="font-bold text-xl px-2">✕</button>
             </div>
-
             <div className="flex-1 overflow-hidden bg-gray-100 relative">
               {viewMode === 'docs' && (
                 <div className="absolute inset-0 flex flex-col md:flex-row divide-x">
                   <div className="flex-1 p-4 overflow-y-auto">
                     <h3 className="text-blue-600 font-bold mb-4">📖 Cours</h3>
-                    {studyingTopic.courseLink ? <iframe src={studyingTopic.courseLink.replace('/view', '/preview')} className="w-full h-full min-h-[400px] border rounded" /> : <p className="italic text-gray-400">Rien</p>}
-                    {studyingTopic.courseLink && <a href={studyingTopic.courseLink} target="_blank" className="block text-center mt-2 text-blue-500 underline">Ouvrir lien</a>}
+                    {studyingTopic.course_link ? <iframe src={studyingTopic.course_link.replace('/view', '/preview')} className="w-full h-full min-h-[400px] border rounded" /> : <p className="italic text-gray-400">Rien</p>}
+                    {studyingTopic.course_link && <a href={studyingTopic.course_link} target="_blank" className="block text-center mt-2 text-blue-500 underline">Ouvrir lien</a>}
                   </div>
                   <div className="flex-1 p-4 overflow-y-auto">
                      <h3 className="text-green-600 font-bold mb-4">✏️ Exos</h3>
-                     {studyingTopic.exerciseLink ? <a href={studyingTopic.exerciseLink} target="_blank" className="block p-4 bg-green-50 border border-green-200 rounded text-green-700 font-bold text-center">Voir Exos</a> : <p className="italic text-gray-400">Rien</p>}
+                     {studyingTopic.exercise_link ? <a href={studyingTopic.exercise_link} target="_blank" className="block p-4 bg-green-50 border border-green-200 rounded text-green-700 font-bold text-center">Voir Exos</a> : <p className="italic text-gray-400">Rien</p>}
                   </div>
                 </div>
               )}
-
               {viewMode === 'cards' && studyingTopic.flashcards && (
                 <div className="absolute inset-0 flex flex-col items-center justify-center p-6 bg-gray-100">
                   <div onClick={() => setIsFlipped(!isFlipped)} className="w-full max-w-2xl aspect-video bg-white rounded-3xl shadow-xl flex items-center justify-center cursor-pointer hover:shadow-2xl transition transform duration-500 relative" style={{ perspective: "1000px" }}>
@@ -335,7 +339,6 @@ export default function ExamPage() {
                 </div>
               )}
             </div>
-
             <div className="p-4 border-t flex justify-center gap-4 bg-white">
                <button onClick={() => reviewCourse(studyingTopic.id, 'hard')} className="px-6 py-3 bg-red-100 text-red-700 font-bold rounded-xl">😰 Dur</button>
                <button onClick={() => reviewCourse(studyingTopic.id, 'easy')} className="px-6 py-3 bg-green-500 text-white font-bold rounded-xl">✅ Fait</button>
