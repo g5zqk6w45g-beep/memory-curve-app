@@ -25,11 +25,17 @@ type Topic = {
   flashcards?: Flashcard[];
 };
 
-const SUBJECTS = ["Maths", "Méca", "Élec", "Physique", "CGE", "MHO", "Anglais", "Autre"];
+type Subject = {
+  name: string;
+};
+
+// Liste par défaut (Au cas où l'utilisateur supprime tout ou n'a rien configuré)
+const DEFAULT_SUBJECTS = ["Maths", "Physique", "Anglais", "Info", "Histoire", "Autre"];
 
 // --- HOOK LOGIQUE (Sépare la DB de l'affichage) ---
 function useHomeLogic() {
   const [topics, setTopics] = useState<Topic[]>([]);
+  const [subjects, setSubjects] = useState<string[]>([]); // <--- Ajout des sujets dynamiques
   const [loading, setLoading] = useState(true);
   const [user, setUser] = useState<any>(null);
   const router = useRouter();
@@ -40,13 +46,26 @@ function useHomeLogic() {
       if (!user) { router.push("/login"); return; }
       setUser(user);
 
-      // On récupère uniquement les sujets ACTIFS
-      const { data, error } = await supabase
+      // 1. On récupère les sujets ACTIFS (Tâches)
+      const { data: topicData, error: topicError } = await supabase
         .from("topics")
         .select("*")
         .eq("is_active", true);
 
-      if (!error && data) setTopics(data);
+      if (!topicError && topicData) setTopics(topicData);
+
+      // 2. On récupère les MATIÈRES personnalisées
+      const { data: subjectData, error: subjectError } = await supabase
+        .from("subjects")
+        .select("name")
+        .order('name', { ascending: true });
+
+      if (!subjectError && subjectData && subjectData.length > 0) {
+        setSubjects(subjectData.map((s: Subject) => s.name));
+      } else {
+        setSubjects(DEFAULT_SUBJECTS);
+      }
+
       setLoading(false);
     };
     init();
@@ -102,10 +121,10 @@ function useHomeLogic() {
     await supabase.from("topics").update({ stage: newStage, next_review: nextReviewStr }).eq("id", id);
   };
 
-  return { topics, loading, user, addTopic, reviewTopic };
+  return { topics, subjects, loading, user, addTopic, reviewTopic };
 }
 
-// --- COMPOSANT ISOLÉ : SESSION D'ÉTUDE (Évite les lags du timer) ---
+// --- COMPOSANT ISOLÉ : SESSION D'ÉTUDE (Inchangé) ---
 function StudySessionModal({ topic, onClose, onReview }: { topic: Topic, onClose: () => void, onReview: (id: number, diff: 'easy' | 'hard') => void }) {
   const [timeLeft, setTimeLeft] = useState(20 * 60);
   const [isTimerActive, setIsTimerActive] = useState(false);
@@ -203,7 +222,7 @@ function StudySessionModal({ topic, onClose, onReview }: { topic: Topic, onClose
 
 // --- COMPOSANT PAGE D'ACCUEIL ---
 export default function Home() {
-  const { topics, loading, addTopic, reviewTopic } = useHomeLogic();
+  const { topics, subjects, loading, addTopic, reviewTopic } = useHomeLogic();
   const router = useRouter();
 
   // États locaux UI
@@ -214,10 +233,17 @@ export default function Home() {
   const [inputVal, setInputVal] = useState("");
   const [courseLink, setCourseLink] = useState("");
   const [exoLink, setExoLink] = useState("");
-  const [selectedSubject, setSelectedSubject] = useState("Maths");
+  const [selectedSubject, setSelectedSubject] = useState("");
+
+  // Met à jour la matière par défaut une fois les sujets chargés
+  useEffect(() => {
+    if (subjects.length > 0 && !selectedSubject) {
+        setSelectedSubject(subjects[0]);
+    }
+  }, [subjects, selectedSubject]);
 
   const handleAdd = async () => {
-      await addTopic(inputVal, selectedSubject, courseLink, exoLink);
+      await addTopic(inputVal, selectedSubject || subjects[0], courseLink, exoLink);
       setInputVal(""); setCourseLink(""); setExoLink("");
   };
 
@@ -319,7 +345,7 @@ export default function Home() {
             <div className="flex flex-col md:flex-row gap-2">
               <input type="text" value={inputVal} onChange={(e) => setInputVal(e.target.value)} placeholder="Titre..." className="flex-[2] p-3 bg-gray-50 border rounded-xl outline-none focus:ring-2 ring-indigo-200" />
               <select value={selectedSubject} onChange={(e) => setSelectedSubject(e.target.value)} className="w-full md:w-auto p-3 bg-gray-50 border rounded-xl font-bold text-gray-600 cursor-pointer">
-                {SUBJECTS.map(s => <option key={s} value={s}>{s}</option>)}
+                {subjects.map(s => <option key={s} value={s}>{s}</option>)}
               </select>
             </div>
             <div className="flex flex-col md:flex-row gap-2">
