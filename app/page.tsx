@@ -1,11 +1,11 @@
 "use client";
-import Streak from "@/components/Streak"; // ✅ Importé ici
-import { useState, useEffect, useRef } from "react";
+import Streak from "@/components/Streak";
+import { useState, useEffect } from "react";
 import Link from "next/link";
 import { supabase } from "@/lib/supabase";
 import { useRouter } from "next/navigation";
 
-// On aligne les types avec la Base de Données
+// --- TYPES ---
 type Flashcard = {
   id: number;
   question: string;
@@ -31,23 +31,26 @@ export default function Home() {
   const [loading, setLoading] = useState(true);
   const [user, setUser] = useState<any>(null);
   
+  // États pour les formulaires
   const [inputVal, setInputVal] = useState("");
   const [courseLink, setCourseLink] = useState("");
   const [exoLink, setExoLink] = useState("");
   const [selectedSubject, setSelectedSubject] = useState("Maths");
 
+  // États pour l'étude (Mode Focus)
   const [studyingTopic, setStudyingTopic] = useState<Topic | null>(null);
   const [timeLeft, setTimeLeft] = useState(20 * 60);
   const [isTimerActive, setIsTimerActive] = useState(false);
   const [viewMode, setViewMode] = useState<'docs' | 'cards'>('docs');
-
-  // Flashcard Player State
   const [currentCardIndex, setCurrentCardIndex] = useState(0);
   const [isFlipped, setIsFlipped] = useState(false);
 
+  // --- NOUVEAU : État pour le Menu Mobile ---
+  const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
+
   const router = useRouter();
 
-  // --- 1. VERIFICATION AUTH & CHARGEMENT DONNÉES ---
+  // --- 1. CHARGEMENT DONNÉES ---
   useEffect(() => {
     const checkUserAndFetch = async () => {
       const { data: { user } } = await supabase.auth.getUser();
@@ -71,7 +74,7 @@ export default function Home() {
     checkUserAndFetch();
   }, [router]);
 
-  // CHRONO LOGIC
+  // --- CHRONO ---
   useEffect(() => {
     let interval: NodeJS.Timeout;
     if (isTimerActive && timeLeft > 0) {
@@ -87,6 +90,8 @@ export default function Home() {
       setViewMode('docs'); 
       setCurrentCardIndex(0);
       setIsFlipped(false);
+      // On ferme le menu mobile si on lance une révision
+      setIsMobileMenuOpen(false);
     }
   }, [studyingTopic]);
 
@@ -96,7 +101,7 @@ export default function Home() {
     return `${m}:${sec < 10 ? '0' : ''}${sec}`;
   };
 
-  // --- 2. AJOUTER UN COURS ---
+  // --- ACTIONS (Ajout / Révision) ---
   const addCourse = async () => {
     if (inputVal.trim() === "" || !user) return;
     
@@ -119,14 +124,12 @@ export default function Home() {
 
     if (error) {
       alert("Erreur lors de l'ajout !");
-      console.error(error);
     } else if (data) {
       setTopics([data[0], ...topics]);
       setInputVal(""); setCourseLink(""); setExoLink("");
     }
   };
 
-  // --- 3. REVISION ---
   const reviewCourse = async (id: number, difficulty: 'easy' | 'hard') => {
     const topic = topics.find(t => t.id === id);
     if (!topic) return;
@@ -152,12 +155,7 @@ export default function Home() {
     setTopics(topics.map(t => t.id === id ? { ...t, stage: newStage, next_review: nextReviewStr } : t));
     setStudyingTopic(null);
 
-    const { error } = await supabase
-      .from("topics")
-      .update({ stage: newStage, next_review: nextReviewStr })
-      .eq("id", id);
-
-    if (error) console.error("Erreur sauvegarde révision", error);
+    await supabase.from("topics").update({ stage: newStage, next_review: nextReviewStr }).eq("id", id);
   };
 
   const nextCard = () => {
@@ -184,20 +182,38 @@ export default function Home() {
   }, {} as { [key: string]: Topic[] });
   const sortedDates = Object.keys(groupedTopics).sort();
 
-  if (loading) return <div className="min-h-screen flex items-center justify-center text-indigo-600 font-bold">Chargement de tes données...</div>;
+  if (loading) return <div className="min-h-screen flex items-center justify-center font-bold">Chargement...</div>;
 
   return (
     <div className="min-h-screen bg-gray-50 font-sans text-gray-800 flex flex-col md:flex-row">
       
-      <aside className="w-full md:w-80 bg-white border-r border-gray-200 p-6 flex flex-col h-auto md:h-screen sticky top-0 z-10">
+      {/* --- 1. HEADER MOBILE (Visible uniquement sur téléphone) --- */}
+      <div className="md:hidden bg-white p-4 flex justify-between items-center shadow-sm sticky top-0 z-20">
+        <div className="flex items-center gap-2">
+            <h1 className="text-xl font-extrabold text-indigo-600">🧠 Memory</h1>
+            <Streak />
+        </div>
+        <button 
+            onClick={() => setIsMobileMenuOpen(!isMobileMenuOpen)} 
+            className="p-2 rounded-lg bg-gray-100 hover:bg-gray-200 transition"
+        >
+            {isMobileMenuOpen ? "✕ Fermer" : "☰ Menu"}
+        </button>
+      </div>
+
+      {/* --- 2. SIDEBAR (Menu Latéral) --- */}
+      {/* Sur Mobile : On le transforme en panneau glissant (fixed) */}
+      {/* Sur PC (md) : Il reste statique à gauche */}
+      <aside className={`
+          fixed inset-y-0 left-0 z-30 w-64 bg-white border-r border-gray-200 p-6 flex flex-col h-screen transform transition-transform duration-300 ease-in-out
+          ${isMobileMenuOpen ? "translate-x-0 shadow-2xl" : "-translate-x-full"} 
+          md:translate-x-0 md:static md:w-80 md:shadow-none
+      `}>
         
-        {/* --- HEADER SIDEBAR AVEC FLAMME 🔥 --- */}
-        <div className="flex flex-col gap-3 mb-6">
+        {/* Titre Sidebar (Caché sur mobile car déjà dans le header) */}
+        <div className="hidden md:flex flex-col gap-3 mb-6">
             <h1 className="text-2xl font-extrabold text-indigo-600">🧠 Memory</h1>
-            {/* On affiche la flamme ici pour qu'elle soit visible tout de suite */}
-            <div>
-                <Streak />
-            </div>
+            <div><Streak /></div>
         </div>
 
         <nav className="space-y-2 mb-6 border-b border-gray-100 pb-6">
@@ -227,8 +243,18 @@ export default function Home() {
         </div>
       </aside>
 
+      {/* --- FOND NOIR (Overlay) quand le menu est ouvert sur mobile --- */}
+      {isMobileMenuOpen && (
+          <div 
+            className="fixed inset-0 bg-black/50 z-20 md:hidden"
+            onClick={() => setIsMobileMenuOpen(false)}
+          />
+      )}
+
+      {/* --- 3. CONTENU PRINCIPAL --- */}
       <main className="flex-1 p-4 md:p-10 max-w-4xl overflow-y-auto min-h-screen" style={{ backgroundImage: `linear-gradient(rgba(255,255,255,0.85), rgba(255,255,255,0.85)), url('https://images.unsplash.com/photo-1709496023433-96b349a55946?fm=jpg&q=60&w=3000&ixlib=rb-4.0.3&ixid=M3wxMjA3fDB8MHxwaG90by1yZWxhdGVkfDE4fHx8ZW58MHx8fHx8')`, backgroundSize: 'cover', backgroundAttachment: 'fixed' }}>
-        <div className="bg-white/80 backdrop-blur-sm p-5 rounded-2xl shadow-sm border border-gray-200 mb-8">
+        
+        <div className="bg-white/80 backdrop-blur-sm p-5 rounded-2xl shadow-sm border border-gray-200 mb-8 mt-4 md:mt-0">
           <h3 className="font-bold mb-4">➕ Ajouter un sujet (Actif)</h3>
           <div className="flex flex-col gap-3">
             <div className="flex gap-2">
@@ -246,7 +272,7 @@ export default function Home() {
         </div>
 
         <h2 className="text-2xl font-bold mb-6">À faire aujourd'hui</h2>
-        <div className="grid gap-4">
+        <div className="grid gap-4 mb-20"> {/* mb-20 pour laisser de la place au scroll */}
           {topics.filter(t => t.next_review <= new Date().toISOString().split("T")[0]).map((topic) => (
             <div key={topic.id} className="flex justify-between items-center p-5 bg-white/90 backdrop-blur rounded-xl border border-gray-100 shadow-sm">
               <div>
@@ -254,14 +280,14 @@ export default function Home() {
                 <span className="text-xs bg-gray-100 px-2 py-1 rounded text-gray-500 mr-2">{topic.subject || "Autre"}</span>
                 <span className="text-xs text-orange-500 font-bold">🔥 Urgent</span>
               </div>
-              <button onClick={() => setStudyingTopic(topic)} className="px-6 py-3 bg-indigo-600 text-white rounded-xl font-bold shadow-lg hover:bg-indigo-700">🚀 GO</button>
+              <button onClick={() => setStudyingTopic(topic)} className="px-6 py-3 bg-indigo-600 text-white rounded-xl font-bold shadow-lg hover:bg-indigo-700">GO</button>
             </div>
           ))}
           {topics.filter(t => t.next_review <= new Date().toISOString().split("T")[0]).length === 0 && <div className="text-center py-10 text-gray-500">Rien à faire !</div>}
         </div>
       </main>
 
-      {/* --- MODAL DE RÉVISION --- */}
+      {/* --- MODAL DE RÉVISION (Reste inchangé) --- */}
       {studyingTopic && (
         <div className="fixed inset-0 bg-black/90 backdrop-blur-md z-50 flex items-center justify-center p-2 md:p-4">
           <div className="bg-white w-full max-w-6xl h-[95vh] rounded-2xl flex flex-col overflow-hidden">
