@@ -60,11 +60,11 @@ function useHomeLogic() {
         .select("name")
         .order('name', { ascending: true });
 
-      if (!subjectError && subjectData && subjectData.length > 0) {
-        setSubjects(subjectData.map((s: Subject) => s.name));
-      } else {
-        setSubjects(DEFAULT_SUBJECTS);
-      }
+      // FUSION : Défauts + DB
+      const dbSubjects = (!subjectError && subjectData) ? subjectData.map((s: Subject) => s.name) : [];
+      const combinedSubjects = Array.from(new Set([...DEFAULT_SUBJECTS, ...dbSubjects]));
+      
+      setSubjects(combinedSubjects.sort());
 
       setLoading(false);
     };

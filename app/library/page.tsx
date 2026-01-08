@@ -30,13 +30,13 @@ type Subject = {
   name: string;
 };
 
-// Liste par défaut si l'utilisateur n'a rien configuré
+// Liste par défaut (toujours visible)
 const DEFAULT_SUBJECTS = ["Maths", "Physique", "Anglais", "Info", "Histoire", "Autre"];
 
 // --- HOOK LOGIQUE ---
 function useLibraryLogic() {
   const [topics, setTopics] = useState<Topic[]>([]);
-  const [subjects, setSubjects] = useState<string[]>([]); // Liste des noms de matières
+  const [subjects, setSubjects] = useState<string[]>([]);
   const [user, setUser] = useState<any>(null);
   const router = useRouter();
 
@@ -54,40 +54,36 @@ function useLibraryLogic() {
         .order('id', { ascending: false });
       if (!topicError && topicData) setTopics(topicData);
 
-      // 2. Charger les matières personnalisées
+      // 2. Charger les matières
       fetchSubjects();
     };
     init();
   }, [router]);
 
   const fetchSubjects = async () => {
-      const { data, error } = await supabase.from("subjects").select("*").order('name', { ascending: true });
-      if (!error && data && data.length > 0) {
-          // Si l'utilisateur a des matières en DB, on les utilise
-          setSubjects(data.map((s: Subject) => s.name));
-      } else {
-          // Sinon, on utilise les défauts (mais on ne sauvegarde pas encore en DB pour ne pas polluer)
-          setSubjects(DEFAULT_SUBJECTS);
-      }
+      // On récupère les matières perso de la DB
+      const { data, error } = await supabase.from("subjects").select("*");
+      const dbSubjects = (!error && data) ? data.map((s: Subject) => s.name) : [];
+
+      // FUSION : Défauts + DB (sans doublons)
+      const combinedSubjects = Array.from(new Set([...DEFAULT_SUBJECTS, ...dbSubjects]));
+      
+      // Tri alphabétique
+      setSubjects(combinedSubjects.sort());
   };
 
   // Gestion des Matières
   const createSubject = async (name: string) => {
      if(!name.trim()) return;
-     // On vérifie si elle existe déjà dans l'état local pour éviter doublon visuel
-     if(subjects.includes(name)) return;
-
-     // Si c'est la première création, on s'assure que la liste locale reflète bien la DB
-     // (Optionnel : on pourrait insérer les défauts d'abord, mais restons simple : on ajoute juste la nouvelle)
-     
+     // On ajoute en DB
      const { error } = await supabase.from("subjects").insert([{ name }]);
-     if (!error) fetchSubjects(); // On recharge tout depuis la DB pour être synchro
+     if (!error) fetchSubjects(); // On recharge la liste fusionnée
   };
 
   const deleteSubjectDB = async (name: string) => {
-      // Attention : on supprime de la liste des choix, mais on garde le nom sur les cours existants (safe)
+      // On supprime de la DB
       await supabase.from("subjects").delete().eq("name", name);
-      fetchSubjects();
+      fetchSubjects(); // On recharge (si c'était un défaut, il restera affiché car il est dans DEFAULT_SUBJECTS)
   };
 
   // Ajouter un cours
@@ -172,23 +168,21 @@ function SubjectManager({ subjects, onAdd, onDelete, onClose }: { subjects: stri
                     {subjects.map(s => (
                         <div key={s} className="flex justify-between items-center bg-gray-50 p-3 rounded-lg border">
                             <span className="font-medium text-gray-700">{s}</span>
+                            {/* On n'affiche le bouton supprimer que si ce n'est PAS une matière par défaut (optionnel, ici on laisse tout) */}
                             <button onClick={() => onDelete(s)} className="text-red-400 hover:text-red-600 text-sm font-bold">Supprimer</button>
                         </div>
                     ))}
                     {subjects.length === 0 && <p className="text-center text-gray-400 italic">Aucune matière.</p>}
                 </div>
                 <div className="mt-4 pt-2 border-t text-xs text-gray-400">
-                    Note : Supprimer une matière ne supprime pas les cours associés (ils garderont juste l'ancien nom).
+                    Note : Les matières par défaut (Maths, etc.) réapparaîtront toujours.
                 </div>
             </div>
         </div>
     );
 }
 
-// --- MODALS DEJA EXISTANTS (StudySession & FlashcardManager) ---
-// (Je remets les versions courtes pour que le code soit complet, 
-//  mais c'est les mêmes qu'avant. Copie-colle les versions complètes si tu préfères)
-
+// --- SOUS-COMPOSANTS MODALS (StudySession & Flashcards) ---
 function StudySessionModal({ topic, onClose, onReview }: { topic: Topic, onClose: () => void, onReview: (id: number, diff: 'easy' | 'hard') => void }) {
   const [timeLeft, setTimeLeft] = useState(20 * 60);
   const [isTimerActive, setIsTimerActive] = useState(false);
@@ -238,8 +232,12 @@ function StudySessionModal({ topic, onClose, onReview }: { topic: Topic, onClose
             <div className="absolute inset-0 flex flex-col md:flex-row divide-x">
               <div className="flex-1 p-4 overflow-y-auto">
                 <h3 className="text-blue-600 font-bold mb-4">📖 Cours</h3>
-                {topic.course_link ? <iframe src={topic.course_link.replace('/view', '/preview')} className="w-full h-64 md:h-full border rounded" /> : <p className="italic text-gray-400">Rien</p>}
-                {topic.course_link && <a href={topic.course_link} target="_blank" className="block text-center mt-2 text-blue-500 underline text-sm">Ouvrir</a>}
+                {topic.course_link ? (
+                    <>
+                    <iframe src={topic.course_link.replace('/view', '/preview')} className="w-full h-64 md:h-full border rounded" />
+                    <a href={topic.course_link} target="_blank" className="block text-center mt-2 text-blue-500 underline text-sm">Ouvrir lien</a>
+                    </>
+                ) : <p className="italic text-gray-400">Rien</p>}
               </div>
               <div className="flex-1 p-4 overflow-y-auto">
                  <h3 className="text-green-600 font-bold mb-4">✏️ Exos</h3>
@@ -321,13 +319,13 @@ export default function LibraryPage() {
   
   // États UI
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
-  const [showSubjectManager, setShowSubjectManager] = useState(false); // <--- Nouveau modal
+  const [showSubjectManager, setShowSubjectManager] = useState(false); 
   const [filterSubject, setFilterSubject] = useState("Tout");
   const [searchTerm, setSearchTerm] = useState("");
   
   // États Formulaire
   const [inputVal, setInputVal] = useState("");
-  const [selectedSubject, setSelectedSubject] = useState(""); // Sera init quand subjects chargés
+  const [selectedSubject, setSelectedSubject] = useState(""); 
   const [courseLink, setCourseLink] = useState("");
   const [exoLink, setExoLink] = useState("");
 
