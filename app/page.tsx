@@ -1,8 +1,9 @@
 "use client";
+import Streak from "@/components/Streak"; // ✅ Importé ici
 import { useState, useEffect, useRef } from "react";
 import Link from "next/link";
-import { supabase } from "@/lib/supabase"; // On importe la connexion
-import { useRouter } from "next/navigation"; // Pour rediriger si pas connecté
+import { supabase } from "@/lib/supabase";
+import { useRouter } from "next/navigation";
 
 // On aligne les types avec la Base de Données
 type Flashcard = {
@@ -16,7 +17,7 @@ type Topic = {
   title: string;
   stage: number;
   next_review: string;
-  course_link?: string; // Attention : snake_case comme dans la DB
+  course_link?: string;
   exercise_link?: string;
   subject?: string;
   is_active?: boolean;
@@ -28,7 +29,7 @@ const SUBJECTS = ["Maths", "Méca", "Élec", "Physique", "CGE", "MHO", "Anglais"
 export default function Home() {
   const [topics, setTopics] = useState<Topic[]>([]);
   const [loading, setLoading] = useState(true);
-  const [user, setUser] = useState<any>(null); // L'utilisateur connecté
+  const [user, setUser] = useState<any>(null);
   
   const [inputVal, setInputVal] = useState("");
   const [courseLink, setCourseLink] = useState("");
@@ -49,16 +50,13 @@ export default function Home() {
   // --- 1. VERIFICATION AUTH & CHARGEMENT DONNÉES ---
   useEffect(() => {
     const checkUserAndFetch = async () => {
-      // Vérifier l'utilisateur
       const { data: { user } } = await supabase.auth.getUser();
       if (!user) {
-        router.push("/login"); // Pas connecté ? Hop, dehors !
+        router.push("/login");
         return;
       }
       setUser(user);
 
-      // Charger les données depuis Supabase
-      // On ne prend que les cours ACTIFS (is_active = true)
       const { data, error } = await supabase
         .from("topics")
         .select("*")
@@ -98,7 +96,7 @@ export default function Home() {
     return `${m}:${sec < 10 ? '0' : ''}${sec}`;
   };
 
-  // --- 2. AJOUTER UN COURS (VERS SUPABASE) ---
+  // --- 2. AJOUTER UN COURS ---
   const addCourse = async () => {
     if (inputVal.trim() === "" || !user) return;
     
@@ -106,31 +104,29 @@ export default function Home() {
     date.setDate(date.getDate() + 1);
     
     const newTopic = {
-      user_id: user.id, // IMPORTANT : On lie le cours à toi
+      user_id: user.id,
       title: inputVal,
       stage: 0,
       next_review: date.toISOString().split("T")[0],
       course_link: courseLink,
       exercise_link: exoLink,
       subject: selectedSubject,
-      is_active: true, // Actif par défaut sur l'accueil
+      is_active: true,
       flashcards: []
     };
 
-    // Envoi à Supabase
     const { data, error } = await supabase.from("topics").insert([newTopic]).select();
 
     if (error) {
       alert("Erreur lors de l'ajout !");
       console.error(error);
     } else if (data) {
-      // On met à jour l'affichage localement sans recharger la page
       setTopics([data[0], ...topics]);
       setInputVal(""); setCourseLink(""); setExoLink("");
     }
   };
 
-  // --- 3. REVISION (UPDATE SUPABASE) ---
+  // --- 3. REVISION ---
   const reviewCourse = async (id: number, difficulty: 'easy' | 'hard') => {
     const topic = topics.find(t => t.id === id);
     if (!topic) return;
@@ -140,7 +136,7 @@ export default function Home() {
 
     if (difficulty === 'hard') {
        daysToAdd = 1;
-       newStage = 0; // Reset si dur
+       newStage = 0;
     } else {
        if (topic.stage === 0) daysToAdd = 2;       
        else if (topic.stage === 1) daysToAdd = 7;  
@@ -153,11 +149,9 @@ export default function Home() {
     newDate.setDate(newDate.getDate() + daysToAdd);
     const nextReviewStr = newDate.toISOString().split("T")[0];
 
-    // Mise à jour optimiste (Interface)
     setTopics(topics.map(t => t.id === id ? { ...t, stage: newStage, next_review: nextReviewStr } : t));
     setStudyingTopic(null);
 
-    // Mise à jour Réelle (Supabase)
     const { error } = await supabase
       .from("topics")
       .update({ stage: newStage, next_review: nextReviewStr })
@@ -178,7 +172,6 @@ export default function Home() {
     }, 200);
   };
 
-  // Fonction Logout
   const handleLogout = async () => {
     await supabase.auth.signOut();
     router.push("/login");
@@ -197,7 +190,16 @@ export default function Home() {
     <div className="min-h-screen bg-gray-50 font-sans text-gray-800 flex flex-col md:flex-row">
       
       <aside className="w-full md:w-80 bg-white border-r border-gray-200 p-6 flex flex-col h-auto md:h-screen sticky top-0 z-10">
-        <h1 className="text-2xl font-extrabold text-indigo-600 mb-6">🧠 Memory</h1>
+        
+        {/* --- HEADER SIDEBAR AVEC FLAMME 🔥 --- */}
+        <div className="flex flex-col gap-3 mb-6">
+            <h1 className="text-2xl font-extrabold text-indigo-600">🧠 Memory</h1>
+            {/* On affiche la flamme ici pour qu'elle soit visible tout de suite */}
+            <div>
+                <Streak />
+            </div>
+        </div>
+
         <nav className="space-y-2 mb-6 border-b border-gray-100 pb-6">
           <Link href="/" className="block p-3 rounded-xl bg-indigo-50 text-indigo-700 font-bold transition">🏠 Révisions</Link>
           <Link href="/exams" className="block p-3 rounded-xl hover:bg-gray-100 text-gray-600 font-medium transition">🎓 Examens</Link>
@@ -218,7 +220,6 @@ export default function Home() {
           {sortedDates.length === 0 && <p className="text-gray-400 text-sm italic">Aucune révision active.</p>}
         </div>
         
-        {/* BOUTON DÉCONNEXION */}
         <div className="mt-4 pt-4 border-t">
            <button onClick={handleLogout} className="w-full bg-red-50 text-red-600 text-xs py-3 rounded font-bold hover:bg-red-100 transition">
              Déconnexion
@@ -290,8 +291,8 @@ export default function Home() {
                     {studyingTopic.course_link && <a href={studyingTopic.course_link} target="_blank" className="block text-center mt-2 text-blue-500 underline">Ouvrir lien</a>}
                   </div>
                   <div className="flex-1 p-4 overflow-y-auto">
-                     <h3 className="text-green-600 font-bold mb-4">✏️ Exos</h3>
-                     {studyingTopic.exercise_link ? <a href={studyingTopic.exercise_link} target="_blank" className="block p-4 bg-green-50 border border-green-200 rounded text-green-700 font-bold text-center">Voir Exos</a> : <p className="italic text-gray-400">Rien</p>}
+                      <h3 className="text-green-600 font-bold mb-4">✏️ Exos</h3>
+                      {studyingTopic.exercise_link ? <a href={studyingTopic.exercise_link} target="_blank" className="block p-4 bg-green-50 border border-green-200 rounded text-green-700 font-bold text-center">Voir Exos</a> : <p className="italic text-gray-400">Rien</p>}
                   </div>
                 </div>
               )}
@@ -299,11 +300,11 @@ export default function Home() {
               {viewMode === 'cards' && studyingTopic.flashcards && (
                 <div className="absolute inset-0 flex flex-col items-center justify-center p-6 bg-gray-100">
                   <div onClick={() => setIsFlipped(!isFlipped)} className="w-full max-w-2xl aspect-video bg-white rounded-3xl shadow-xl flex items-center justify-center cursor-pointer hover:shadow-2xl transition transform duration-500 relative" style={{ perspective: "1000px" }}>
-                     <div className="text-center p-8">
-                        <p className="text-sm text-gray-400 uppercase font-bold tracking-widest mb-4">{isFlipped ? "Verso (Réponse)" : "Recto (Question)"}</p>
-                        <h3 className={`text-2xl md:text-4xl font-bold ${isFlipped ? 'text-indigo-600' : 'text-gray-800'}`}>{isFlipped ? studyingTopic.flashcards[currentCardIndex].answer : studyingTopic.flashcards[currentCardIndex].question}</h3>
-                        <p className="mt-8 text-gray-400 text-sm animate-pulse">(Clique pour retourner)</p>
-                     </div>
+                      <div className="text-center p-8">
+                         <p className="text-sm text-gray-400 uppercase font-bold tracking-widest mb-4">{isFlipped ? "Verso (Réponse)" : "Recto (Question)"}</p>
+                         <h3 className={`text-2xl md:text-4xl font-bold ${isFlipped ? 'text-indigo-600' : 'text-gray-800'}`}>{isFlipped ? studyingTopic.flashcards[currentCardIndex].answer : studyingTopic.flashcards[currentCardIndex].question}</h3>
+                         <p className="mt-8 text-gray-400 text-sm animate-pulse">(Clique pour retourner)</p>
+                      </div>
                   </div>
                   <div className="mt-8 flex items-center gap-6">
                     <span className="font-mono text-gray-500">Carte {currentCardIndex + 1} / {studyingTopic.flashcards.length}</span>
