@@ -252,147 +252,167 @@ function FlashcardManager({ topic, onClose, onUpdate }: { topic: Topic, onClose:
     );
 }
 
-// --- COMPOSANT PRINCIPAL ---
+// --- COMPOSANT PRINCIPAL AVEC MENU BURGER ---
 export default function LibraryPage() {
-  const { topics, updateTopic, deleteTopic, addTopic, reviewTopic } = useLibraryLogic();
+    const { topics, updateTopic, deleteTopic, addTopic, reviewTopic } = useLibraryLogic();
+    
+    // États UI
+    const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false); // <--- NOUVEAU
+    const [filterSubject, setFilterSubject] = useState("Tout");
+    const [searchTerm, setSearchTerm] = useState("");
+    
+    // États Formulaire
+    const [inputVal, setInputVal] = useState("");
+    const [selectedSubject, setSelectedSubject] = useState("Maths");
+    const [courseLink, setCourseLink] = useState("");
+    const [exoLink, setExoLink] = useState("");
   
-  // États UI locaux
-  const [filterSubject, setFilterSubject] = useState("Tout");
-  const [searchTerm, setSearchTerm] = useState("");
+    // Modals
+    const [flashcardTopic, setFlashcardTopic] = useState<Topic | null>(null);
+    const [studyingTopic, setStudyingTopic] = useState<Topic | null>(null);
   
-  // États Formulaire Ajout
-  const [inputVal, setInputVal] = useState("");
-  const [selectedSubject, setSelectedSubject] = useState("Maths");
-  const [courseLink, setCourseLink] = useState("");
-  const [exoLink, setExoLink] = useState("");
-
-  // Modals
-  const [flashcardTopic, setFlashcardTopic] = useState<Topic | null>(null);
-  const [studyingTopic, setStudyingTopic] = useState<Topic | null>(null);
-
-  const handleAdd = async () => {
-      await addTopic(inputVal, selectedSubject, courseLink, exoLink);
-      setInputVal(""); setCourseLink(""); setExoLink("");
-  };
-
-  const handleFlashcardUpdate = async (topicId: number, newCards: Flashcard[]) => {
-     await updateTopic(topicId, { flashcards: newCards });
-     // Mettre à jour l'état local du modal pour refléter les changements immédiatement
-     setFlashcardTopic(prev => prev ? { ...prev, flashcards: newCards } : null);
-  };
-
-  const filteredTopics = topics.filter(t => {
-    const matchesSubject = filterSubject === "Tout" || (t.subject || "Autre") === filterSubject;
-    const matchesSearch = t.title.toLowerCase().includes(searchTerm.toLowerCase());
-    return matchesSubject && matchesSearch;
-  });
-
-  return (
-    <div className="min-h-screen bg-gray-50 font-sans text-gray-800 flex flex-col md:flex-row">
-      {/* SIDEBAR */}
-      <aside className="w-full md:w-64 bg-white border-r border-gray-200 p-6 flex flex-col h-auto md:h-screen sticky top-0 z-10 shrink-0">
-        <h1 className="text-2xl font-extrabold text-indigo-600 mb-6">🧠 Memory</h1>
-        <nav className="space-y-2">
-          <Link href="/" className="block p-3 rounded-xl hover:bg-gray-100 text-gray-600 font-medium transition">🏠 Révisions</Link>
-          <Link href="/exams" className="block p-3 rounded-xl hover:bg-gray-100 text-gray-600 font-medium transition">🎓 Examens</Link>
-          <Link href="/library" className="block p-3 rounded-xl bg-indigo-50 text-indigo-700 font-bold transition">📚 Bibliothèque</Link>
-        </nav>
-      </aside>
-
-      {/* MAIN CONTENT */}
-      <main className="flex-1 p-4 md:p-10 max-w-7xl overflow-y-auto min-h-screen" 
-            style={{ backgroundImage: `linear-gradient(rgba(255,255,255,0.85), rgba(255,255,255,0.85)), url('https://polelrsy.univ-nantes.fr/medias/photo/bu-travail_1669802335851-png')`, backgroundSize: 'cover', backgroundAttachment: 'fixed' }}>
+    const handleAdd = async () => {
+        await addTopic(inputVal, selectedSubject, courseLink, exoLink);
+        setInputVal(""); setCourseLink(""); setExoLink("");
+    };
+  
+    const handleFlashcardUpdate = async (topicId: number, newCards: Flashcard[]) => {
+       await updateTopic(topicId, { flashcards: newCards });
+       setFlashcardTopic(prev => prev ? { ...prev, flashcards: newCards } : null);
+    };
+  
+    const filteredTopics = topics.filter(t => {
+      const matchesSubject = filterSubject === "Tout" || (t.subject || "Autre") === filterSubject;
+      const matchesSearch = t.title.toLowerCase().includes(searchTerm.toLowerCase());
+      return matchesSubject && matchesSearch;
+    });
+  
+    return (
+      <div className="min-h-screen bg-gray-50 font-sans text-gray-800 flex flex-col md:flex-row relative">
         
-        <h2 className="text-3xl font-bold mb-6 relative z-10">📚 Ta Bibliothèque</h2>
-
-        {/* AJOUTER UN COURS */}
-        <div className="bg-white/90 backdrop-blur p-5 rounded-2xl shadow-sm border border-gray-200 mb-8 relative z-10">
-          <h3 className="font-bold mb-3 text-gray-700">📥 Ajouter un cours</h3>
-          <div className="flex flex-col gap-3">
-            <div className="flex gap-2">
-              <input type="text" value={inputVal} onChange={(e) => setInputVal(e.target.value)} placeholder="Titre du cours..." className="flex-[2] p-3 bg-gray-50 border rounded-xl focus:ring-2 ring-indigo-200 outline-none" />
-              <select value={selectedSubject} onChange={(e) => setSelectedSubject(e.target.value)} className="flex-1 p-3 bg-gray-50 border rounded-xl font-bold text-gray-600 cursor-pointer">
-                {SUBJECTS.filter(s=>s!=="Tout").map(s => <option key={s} value={s}>{s}</option>)}
-              </select>
-            </div>
-            <div className="flex gap-2">
-              <input type="text" value={courseLink} onChange={(e) => setCourseLink(e.target.value)} placeholder="🔗 Lien Cours (PDF/Drive...)" className="flex-1 p-2 text-sm bg-gray-50 border rounded-lg" />
-              <input type="text" value={exoLink} onChange={(e) => setExoLink(e.target.value)} placeholder="🔗 Lien Exos" className="flex-1 p-2 text-sm bg-gray-50 border rounded-lg" />
-            </div>
-            <button onClick={handleAdd} className="bg-gray-800 text-white py-3 rounded-xl font-bold hover:bg-gray-900 transition shadow-lg">Ajouter à la liste</button>
-          </div>
+        {/* 1. HEADER MOBILE (Visible uniquement sur petit écran) */}
+        <div className="md:hidden bg-white p-4 border-b flex justify-between items-center sticky top-0 z-20 shadow-sm">
+          <h1 className="text-xl font-extrabold text-indigo-600">🧠 Memory</h1>
+          <button onClick={() => setIsMobileMenuOpen(true)} className="p-2 text-gray-600 border rounded-lg hover:bg-gray-100">
+            {/* Icône Burger SVG */}
+            <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 6h16M4 12h16M4 18h16" /></svg>
+          </button>
         </div>
-
-        {/* FILTRES & RECHERCHE */}
-        <div className="flex flex-col md:flex-row justify-between items-center mb-6 gap-4 relative z-10">
-          <div className="flex flex-wrap gap-2">
-            {SUBJECTS.map(subj => (
-              <button key={subj} onClick={() => setFilterSubject(subj)} 
-                className={`px-4 py-2 rounded-full text-sm font-bold transition shadow-sm ${filterSubject === subj ? "bg-black text-white" : "bg-white/90 backdrop-blur border border-gray-200 text-gray-600 hover:bg-white"}`}>
-                {subj}
+  
+        {/* 2. OVERLAY (Fond sombre quand le menu est ouvert sur mobile) */}
+        {isMobileMenuOpen && (
+          <div 
+              className="fixed inset-0 bg-black/50 z-30 md:hidden backdrop-blur-sm"
+              onClick={() => setIsMobileMenuOpen(false)}
+          />
+        )}
+  
+        {/* 3. SIDEBAR (Responsive) */}
+        <aside className={`
+            fixed inset-y-0 left-0 z-40 w-64 bg-white border-r border-gray-200 p-6 flex flex-col h-screen transition-transform duration-300 ease-in-out
+            ${isMobileMenuOpen ? "translate-x-0" : "-translate-x-full"} 
+            md:translate-x-0 md:sticky md:top-0 md:h-screen md:block
+        `}>
+          <div className="flex justify-between items-center mb-8">
+              <h1 className="text-2xl font-extrabold text-indigo-600">🧠 Memory</h1>
+              {/* Bouton Fermer (Visible uniquement sur mobile) */}
+              <button onClick={() => setIsMobileMenuOpen(false)} className="md:hidden text-gray-400 hover:text-gray-800">
+                  <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" /></svg>
               </button>
-            ))}
           </div>
-          <input type="text" placeholder="🔍 Rechercher un titre..." value={searchTerm} onChange={(e) => setSearchTerm(e.target.value)} className="p-3 border rounded-xl w-full md:w-64 shadow-sm outline-none bg-white/90 backdrop-blur focus:ring-2 ring-indigo-100" />
-        </div>
-
-        {/* GRILLE DES COURS */}
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-          {filteredTopics.map(topic => {
-            const isActive = topic.is_active !== false; 
-            const flashcardCount = topic.flashcards ? topic.flashcards.length : 0;
-            return (
-              <div key={topic.id} className={`p-5 rounded-2xl shadow-sm border transition flex flex-col group relative ${isActive ? 'bg-white/95 border-gray-200' : 'bg-gray-100/90 border-gray-200 grayscale-[0.5]'}`}>
-                <div className="flex justify-between items-start mb-3">
-                  <div className={`text-xs font-bold px-2 py-1 rounded uppercase ${isActive ? 'bg-indigo-50 text-indigo-600' : 'bg-gray-200 text-gray-500'}`}>{topic.subject || "Autre"}</div>
-                  <div className="flex items-center gap-2">
-                    <button onClick={() => updateTopic(topic.id, { is_active: !topic.is_active })} className={`p-1.5 rounded-lg font-bold text-xs transition border ${isActive ? 'bg-green-100 text-green-700 border-green-200' : 'bg-gray-200 text-gray-600 border-gray-300'}`} title={isActive ? "Désactiver" : "Activer"}>
-                        {isActive ? "Actif" : "Inactif"}
-                    </button>
-                    <button onClick={() => setFlashcardTopic(topic)} className="bg-orange-50 hover:bg-orange-100 text-orange-600 p-1.5 rounded-lg border border-orange-200 transition" title="Gérer les Flashcards">
-                      🃏 <span className="text-xs font-bold">{flashcardCount}</span>
-                    </button>
-                    <button onClick={() => deleteTopic(topic.id)} className="text-gray-300 hover:text-red-500 transition p-1">🗑</button>
+  
+          <nav className="space-y-2">
+            <Link href="/" onClick={() => setIsMobileMenuOpen(false)} className="block p-3 rounded-xl hover:bg-gray-100 text-gray-600 font-medium transition">🏠 Révisions</Link>
+            <Link href="/exams" onClick={() => setIsMobileMenuOpen(false)} className="block p-3 rounded-xl hover:bg-gray-100 text-gray-600 font-medium transition">🎓 Examens</Link>
+            <Link href="/library" onClick={() => setIsMobileMenuOpen(false)} className="block p-3 rounded-xl bg-indigo-50 text-indigo-700 font-bold transition">📚 Bibliothèque</Link>
+          </nav>
+  
+          <div className="mt-auto pt-6 border-t">
+               <p className="text-xs text-gray-400 text-center">Version 2.0</p>
+          </div>
+        </aside>
+  
+        {/* MAIN CONTENT */}
+        <main className="flex-1 p-4 md:p-10 max-w-7xl overflow-y-auto min-h-screen" 
+              style={{ backgroundImage: `linear-gradient(rgba(255,255,255,0.85), rgba(255,255,255,0.85)), url('https://polelrsy.univ-nantes.fr/medias/photo/bu-travail_1669802335851-png')`, backgroundSize: 'cover', backgroundAttachment: 'fixed' }}>
+          
+          <h2 className="text-3xl font-bold mb-6 relative z-10 hidden md:block">📚 Ta Bibliothèque</h2>
+  
+          {/* AJOUTER UN COURS */}
+          <div className="bg-white/90 backdrop-blur p-5 rounded-2xl shadow-sm border border-gray-200 mb-8 relative z-10 mt-4 md:mt-0">
+            <h3 className="font-bold mb-3 text-gray-700">📥 Ajouter un cours</h3>
+            <div className="flex flex-col gap-3">
+              <div className="flex flex-col md:flex-row gap-2">
+                <input type="text" value={inputVal} onChange={(e) => setInputVal(e.target.value)} placeholder="Titre du cours..." className="flex-[2] p-3 bg-gray-50 border rounded-xl focus:ring-2 ring-indigo-200 outline-none" />
+                <select value={selectedSubject} onChange={(e) => setSelectedSubject(e.target.value)} className="w-full md:w-auto p-3 bg-gray-50 border rounded-xl font-bold text-gray-600 cursor-pointer">
+                  {SUBJECTS.filter(s=>s!=="Tout").map(s => <option key={s} value={s}>{s}</option>)}
+                </select>
+              </div>
+              <div className="flex flex-col md:flex-row gap-2">
+                <input type="text" value={courseLink} onChange={(e) => setCourseLink(e.target.value)} placeholder="🔗 Lien Cours" className="flex-1 p-2 text-sm bg-gray-50 border rounded-lg" />
+                <input type="text" value={exoLink} onChange={(e) => setExoLink(e.target.value)} placeholder="🔗 Lien Exos" className="flex-1 p-2 text-sm bg-gray-50 border rounded-lg" />
+              </div>
+              <button onClick={handleAdd} className="bg-gray-800 text-white py-3 rounded-xl font-bold hover:bg-gray-900 transition shadow-lg">Ajouter à la liste</button>
+            </div>
+          </div>
+  
+          {/* FILTRES & RECHERCHE */}
+          <div className="flex flex-col md:flex-row justify-between items-center mb-6 gap-4 relative z-10">
+            <div className="flex flex-wrap gap-2 justify-center md:justify-start">
+              {SUBJECTS.map(subj => (
+                <button key={subj} onClick={() => setFilterSubject(subj)} 
+                  className={`px-3 py-1.5 md:px-4 md:py-2 rounded-full text-xs md:text-sm font-bold transition shadow-sm ${filterSubject === subj ? "bg-black text-white" : "bg-white/90 backdrop-blur border border-gray-200 text-gray-600 hover:bg-white"}`}>
+                  {subj}
+                </button>
+              ))}
+            </div>
+            <input type="text" placeholder="🔍 Rechercher..." value={searchTerm} onChange={(e) => setSearchTerm(e.target.value)} className="p-3 border rounded-xl w-full md:w-64 shadow-sm outline-none bg-white/90 backdrop-blur focus:ring-2 ring-indigo-100" />
+          </div>
+  
+          {/* GRILLE DES COURS */}
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6 pb-10">
+            {filteredTopics.map(topic => {
+              const isActive = topic.is_active !== false; 
+              const flashcardCount = topic.flashcards ? topic.flashcards.length : 0;
+              return (
+                <div key={topic.id} className={`p-5 rounded-2xl shadow-sm border transition flex flex-col group relative ${isActive ? 'bg-white/95 border-gray-200' : 'bg-gray-100/90 border-gray-200 grayscale-[0.5]'}`}>
+                  {/* ... (Contenu inchangé de la carte) ... */}
+                  <div className="flex justify-between items-start mb-3">
+                    <div className={`text-xs font-bold px-2 py-1 rounded uppercase ${isActive ? 'bg-indigo-50 text-indigo-600' : 'bg-gray-200 text-gray-500'}`}>{topic.subject || "Autre"}</div>
+                    <div className="flex items-center gap-2">
+                      <button onClick={() => updateTopic(topic.id, { is_active: !topic.is_active })} className={`p-1.5 rounded-lg font-bold text-xs transition border ${isActive ? 'bg-green-100 text-green-700 border-green-200' : 'bg-gray-200 text-gray-600 border-gray-300'}`}>
+                          {isActive ? "Actif" : "Inactif"}
+                      </button>
+                      <button onClick={() => setFlashcardTopic(topic)} className="bg-orange-50 hover:bg-orange-100 text-orange-600 p-1.5 rounded-lg border border-orange-200 transition">
+                        🃏 <span className="text-xs font-bold">{flashcardCount}</span>
+                      </button>
+                      <button onClick={() => deleteTopic(topic.id)} className="text-gray-300 hover:text-red-500 transition p-1">🗑</button>
+                    </div>
+                  </div>
+                  
+                  <h3 className={`font-bold text-lg mb-2 flex-1 ${isActive ? 'text-gray-900' : 'text-gray-500'}`}>{topic.title}</h3>
+                  <select className="text-xs bg-transparent text-gray-400 outline-none cursor-pointer hover:text-indigo-600 mb-4 w-full" value={topic.subject || "Autre"} onChange={(e) => updateTopic(topic.id, { subject: e.target.value })}>
+                      <option value="Autre">Changer matière...</option>
+                      {SUBJECTS.filter(s => s !== "Tout").map(s => <option key={s} value={s}>{s}</option>)}
+                  </select>
+  
+                  <button onClick={() => setStudyingTopic(topic)} className={`w-full py-2.5 rounded-xl font-bold text-sm mb-3 shadow-sm transition active:scale-95 ${isActive ? 'bg-indigo-600 text-white hover:bg-indigo-700' : 'bg-gray-300 text-gray-600 hover:bg-gray-400'}`}>
+                      🚀 Lancer Session
+                  </button>
+  
+                  <div className="flex gap-2 mt-auto">
+                    {topic.course_link ? <a href={topic.course_link} target="_blank" className="flex-1 py-2 text-center bg-blue-50 text-blue-600 rounded-lg text-sm font-bold hover:bg-blue-100 transition">📄 Cours</a> : <span className="flex-1 py-2 text-center bg-gray-50 text-gray-300 rounded-lg text-sm cursor-not-allowed">Pas de doc</span>}
+                    {topic.exercise_link ? <a href={topic.exercise_link} target="_blank" className="flex-1 py-2 text-center bg-green-50 text-green-600 rounded-lg text-sm font-bold hover:bg-green-100 transition">✏️ Exos</a> : <span className="flex-1 py-2 text-center bg-gray-50 text-gray-300 rounded-lg text-sm cursor-not-allowed">Pas d'exos</span>}
                   </div>
                 </div>
-                
-                <h3 className={`font-bold text-lg mb-2 flex-1 ${isActive ? 'text-gray-900' : 'text-gray-500'}`}>{topic.title}</h3>
-                
-                <select className="text-xs bg-transparent text-gray-400 outline-none cursor-pointer hover:text-indigo-600 mb-4 w-full" value={topic.subject || "Autre"} onChange={(e) => updateTopic(topic.id, { subject: e.target.value })}>
-                    <option value="Autre">Changer matière...</option>
-                    {SUBJECTS.filter(s => s !== "Tout").map(s => <option key={s} value={s}>{s}</option>)}
-                </select>
-
-                <button onClick={() => setStudyingTopic(topic)} className={`w-full py-2.5 rounded-xl font-bold text-sm mb-3 shadow-sm transition transform active:scale-95 ${isActive ? 'bg-indigo-600 text-white hover:bg-indigo-700' : 'bg-gray-300 text-gray-600 hover:bg-gray-400'}`}>
-                    🚀 Lancer Session
-                </button>
-
-                <div className="flex gap-2 mt-auto">
-                  {topic.course_link ? <a href={topic.course_link} target="_blank" className="flex-1 py-2 text-center bg-blue-50 text-blue-600 rounded-lg text-sm font-bold hover:bg-blue-100 transition">📄 Cours</a> : <span className="flex-1 py-2 text-center bg-gray-50 text-gray-300 rounded-lg text-sm cursor-not-allowed">Pas de doc</span>}
-                  {topic.exercise_link ? <a href={topic.exercise_link} target="_blank" className="flex-1 py-2 text-center bg-green-50 text-green-600 rounded-lg text-sm font-bold hover:bg-green-100 transition">✏️ Exos</a> : <span className="flex-1 py-2 text-center bg-gray-50 text-gray-300 rounded-lg text-sm cursor-not-allowed">Pas d'exos</span>}
-                </div>
-              </div>
-            );
-          })}
-        </div>
-      </main>
-
-      {/* MODALS RENDER */}
-      {flashcardTopic && (
-        <FlashcardManager 
-            topic={flashcardTopic} 
-            onClose={() => setFlashcardTopic(null)} 
-            onUpdate={handleFlashcardUpdate} 
-        />
-      )}
-
-      {studyingTopic && (
-        <StudySessionModal 
-            topic={studyingTopic} 
-            onClose={() => setStudyingTopic(null)} 
-            onReview={reviewTopic} 
-        />
-      )}
-    </div>
-  );
-}
+              );
+            })}
+          </div>
+        </main>
+  
+        {/* MODALS (Inchangés) */}
+        {flashcardTopic && <FlashcardManager topic={flashcardTopic} onClose={() => setFlashcardTopic(null)} onUpdate={handleFlashcardUpdate} />}
+        {studyingTopic && <StudySessionModal topic={studyingTopic} onClose={() => setStudyingTopic(null)} onReview={reviewTopic} />}
+      </div>
+    );
+  }
